@@ -362,10 +362,10 @@ class Plugin:
         valid = (
             isinstance(url, str)
             and url.startswith(prefix)
-            and ".." not in url
-            and "\\" not in url
+            # Browsers normalize %2e%2e, so any escape could hide a way out of the prefix.
+            and not any(c in url for c in ("..", "\\", "%"))
             and isinstance(action.get("id"), str)
-            and isinstance(action.get("label"), (str, dict))
+            and self._valid_ui_label(action.get("label"))
             and self._valid_ui_file(action.get("when_file"))
             and self._valid_ui_file(action.get("unless_file"))
             and self._valid_ui_places(action.get("places"))
@@ -373,6 +373,12 @@ class Plugin:
         if not valid:
             logger.warning("Plugin '%s' declared an invalid UI action, ignoring it: %r", plugin_id, action)
         return valid
+
+    @staticmethod
+    def _valid_ui_label(label: Any) -> bool:
+        if isinstance(label, dict):
+            return all(isinstance(text, str) for text in label.values())
+        return isinstance(label, str)
 
     @staticmethod
     def _valid_ui_file(name: Any) -> bool:
