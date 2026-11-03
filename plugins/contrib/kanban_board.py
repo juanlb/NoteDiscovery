@@ -264,6 +264,20 @@ class Plugin:
         logger = ctx.logger
         self.notes_dir = ctx.notes_dir
 
+    def get_ui(self) -> dict:
+        """Folder action for core versions with plugin UI actions. Older versions
+        never call this, and the board stays reachable by URL."""
+        return {
+            "folder_actions": [
+                {
+                    "id": "open_board",
+                    "label": {"en": "Open as board", "es": "Abrir como tablero"},
+                    "icon": "board",
+                    "url": "/api/plugins/kanban_board/board?folder={folder}",
+                }
+            ]
+        }
+
     def get_routes(self) -> APIRouter:
         """Expose the board page and its data at /api/plugins/kanban_board/."""
         router = APIRouter()
