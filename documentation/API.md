@@ -478,8 +478,8 @@ See [PLUGINS.md](PLUGINS.md) for full documentation on creating plugins.
 GET /api/plugins
 ```
 
-An enabled plugin that declares UI actions also returns a `ui` key. See
-[PLUGINS.md](PLUGINS.md#ui-actions).
+An enabled plugin that declares UI actions also returns a `ui` key, and one that declares
+MCP tools returns an `mcp_tools` key. See [PLUGINS.md](PLUGINS.md#ui-actions).
 
 ### Toggle Plugin
 ```http
