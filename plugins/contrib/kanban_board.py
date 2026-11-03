@@ -28,7 +28,8 @@ Board schema (optional): <folder>/_board.md
         owner: text
     ---
 
-Without this file the board uses exactly the columns, done list and fields above.
+Without this file the board uses exactly the columns, done list and fields above,
+and the page offers a button to create it.
 
 Card: any .md in the folder. Files starting with "_" or "." are not cards.
 
@@ -68,6 +69,19 @@ MAX_READ_CHARS = 16 * 1024
 DEFAULT_COLUMNS = ["backlog", "todo", "doing", "done"]
 DEFAULT_DONE = ["done"]
 DEFAULT_FIELDS = {"due": "date", "priority": ["low", "med", "high"], "owner": "text"}
+
+# What the "Create _board.md" button writes.
+BOARD_TEMPLATE = """---
+board:
+  columns: [backlog, todo, doing, done]
+  done: [done]
+  fields:
+    due: date
+    priority: [low, med, high]
+    owner: text
+---
+Board settings for this folder. The kanban_board plugin ignores this text.
+"""
 
 ISO_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 HEADING_PATTERN = re.compile(r"^#[ \t]+(.+?)[ \t]*#*[ \t]*$")
@@ -303,6 +317,7 @@ class Plugin:
         return {
             "folder": "" if rel_folder == "." else rel_folder,
             **config,
+            "board_template": BOARD_TEMPLATE,
             "cards": cards,
         }
 
@@ -357,6 +372,11 @@ kanbanApplyTheme();
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 body {
+  /* Theme status colors are tuned for icons and borders, and some are too pale for
+     small text on a light theme. Pulling them toward the text color fixes that on
+     light and dark themes alike. */
+  --kanban-error: color-mix(in srgb, var(--error) 60%, var(--text-primary));
+  --kanban-warning: color-mix(in srgb, var(--warning) 40%, var(--text-primary));
   display: flex;
   flex-direction: column;
   background: var(--bg-primary);
@@ -370,7 +390,7 @@ svg { flex-shrink: 0; }
 :focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 1px; }
 
 .top { padding: 14px 20px 0; }
-.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12px; color: var(--text-tertiary); }
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12px; color: var(--text-secondary); }
 .crumbs a { display: inline-flex; align-items: center; gap: 4px; color: var(--text-secondary); text-decoration: none; }
 .crumbs a:hover { color: var(--accent-primary); }
 .head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 6px; }
@@ -380,13 +400,23 @@ svg { flex-shrink: 0; }
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 34px; padding: 0 12px; border: 1px solid var(--border-primary); border-radius: 6px; background: var(--bg-secondary); color: var(--text-secondary); }
 .btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 .btn-icon { width: 34px; padding: 0; }
+.btn-primary { border-color: var(--accent-primary); background: var(--accent-primary); color: var(--bg-primary); font-weight: 600; }
+.btn-primary:hover { border-color: var(--accent-hover); background: var(--accent-hover); color: var(--bg-primary); }
+.column-add { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--text-tertiary); }
+.column-add:hover { background: var(--bg-hover); color: var(--text-primary); }
+dialog { width: min(420px, calc(100vw - 32px)); padding: 16px; border: 1px solid var(--border-primary); border-radius: 8px; background: var(--bg-primary); color: var(--text-primary); box-shadow: var(--shadow-md); }
+dialog::backdrop { background: rgba(0, 0, 0, .4); }
+dialog h2 { margin: 0 0 12px; font-size: 16px; }
+.form-row { display: block; margin-bottom: 12px; font-size: 12px; color: var(--text-secondary); }
+.form-row input, .form-row select { display: block; width: 100%; height: 38px; margin-top: 4px; padding: 0 8px; border: 1px solid var(--border-primary); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary); font: inherit; font-size: 14px; }
+.form-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 .filters { display: flex; align-items: center; gap: 10px; padding: 10px 20px; }
 .chips { display: flex; flex: 1; min-width: 0; flex-wrap: wrap; gap: 6px; }
-.chip-btn { height: 26px; padding: 0 10px; border: 1px solid transparent; border-radius: 9999px; background: var(--bg-tertiary); color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
+.chip-btn { height: 26px; padding: 0 10px; border: 1px solid transparent; border-radius: 9999px; background: var(--bg-tertiary); color: var(--text-primary); font-size: 12px; white-space: nowrap; }
 .chip-btn:hover { background: var(--bg-hover); }
 .chip-btn[aria-pressed="true"] { background: var(--accent-primary); color: var(--bg-primary); }
-.count { font-size: 12px; color: var(--text-tertiary); white-space: nowrap; }
+.count { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
 
 .pills { display: none; }
 .board { flex: 1; min-height: 0; display: flex; align-items: stretch; gap: 12px; padding: 0 20px 16px; overflow-x: auto; }
@@ -396,29 +426,29 @@ svg { flex-shrink: 0; }
 .dot { width: 8px; height: 8px; flex-shrink: 0; border-radius: 50%; background: var(--accent-primary); }
 .dot-first { background: var(--text-tertiary); }
 .dot-done { background: var(--success); }
-.column-count { font-size: 12px; font-weight: 400; color: var(--text-tertiary); }
+.column-count { font-size: 12px; font-weight: 400; color: var(--text-secondary); }
 .cards { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 0 8px 8px; overflow-y: auto; }
-.empty-column { padding: 16px 8px; border: 1px dashed var(--border-primary); border-radius: 6px; color: var(--text-tertiary); font-size: 12px; text-align: center; }
+.empty-column { padding: 16px 8px; border: 1px dashed var(--border-primary); border-radius: 6px; color: var(--text-secondary); font-size: 12px; text-align: center; }
 
 .card { display: flex; flex-direction: column; flex-shrink: 0; gap: 6px; padding: 10px; border: 1px solid var(--border-primary); border-radius: 8px; background: var(--bg-primary); box-shadow: var(--shadow-sm); }
 .card:hover { box-shadow: var(--shadow-md); border-color: var(--border-secondary); }
 .card-top { display: flex; align-items: flex-start; gap: 8px; }
 .card-title { flex: 1; min-width: 0; font-weight: 600; text-decoration: none; overflow-wrap: anywhere; }
 .card-title:hover { color: var(--accent-primary); }
-.card-done .card-title { text-decoration: line-through; color: var(--text-tertiary); }
-.card-done { opacity: .75; }
+.card-done .card-title { text-decoration: line-through; color: var(--text-secondary); }
+.card-done { opacity: .85; }
 .priority { flex-shrink: 0; padding: 1px 7px; border-radius: 9999px; font-size: 11px; font-weight: 600; background: var(--bg-tertiary); color: var(--text-secondary); }
-.priority-high { color: var(--error); background: color-mix(in srgb, var(--error) 14%, transparent); }
-.priority-med { color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); }
-.priority-low { color: var(--text-tertiary); }
+.priority-high { color: var(--kanban-error); background: color-mix(in srgb, var(--error) 14%, transparent); }
+.priority-med { color: var(--kanban-warning); background: color-mix(in srgb, var(--warning) 14%, transparent); }
+.priority-low { color: var(--text-secondary); }
 .tags { display: flex; flex-wrap: wrap; gap: 4px; }
-.tag { padding: 1px 7px; border-radius: 9999px; background: var(--bg-tertiary); color: var(--text-secondary); font-size: 11px; overflow-wrap: anywhere; }
-.meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12px; color: var(--text-tertiary); }
+.tag { padding: 1px 7px; border-radius: 9999px; background: var(--bg-tertiary); color: var(--text-primary); font-size: 11px; overflow-wrap: anywhere; }
+.meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12px; color: var(--text-secondary); }
 .meta-item { display: inline-flex; align-items: center; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
-.date-soon { color: var(--warning); font-weight: 600; }
-.date-late { color: var(--error); font-weight: 600; }
-.file { font: 10px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--text-tertiary); overflow-wrap: anywhere; }
-.warning { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--warning); overflow-wrap: anywhere; }
+.date-soon { color: var(--kanban-warning); font-weight: 600; }
+.date-late { color: var(--kanban-error); font-weight: 600; }
+.file { font: 10px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--text-secondary); overflow-wrap: anywhere; }
+.warning { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--kanban-warning); overflow-wrap: anywhere; }
 
 .card[draggable="true"] { cursor: grab; }
 .card-moving { opacity: .5; }
@@ -434,7 +464,7 @@ svg { flex-shrink: 0; }
   .card:hover .move-select, .move-select:focus { opacity: 1; }
 }
 
-.state { margin: auto; padding: 32px 20px; color: var(--text-tertiary); text-align: center; }
+.state { margin: auto; padding: 32px 20px; color: var(--text-secondary); text-align: center; }
 
 @media (max-width: 640px) {
   html, body { height: auto; }
@@ -443,9 +473,10 @@ svg { flex-shrink: 0; }
   .search { flex: 1 1 0; height: 44px; font-size: 16px; }
   .btn { height: 44px; }
   .btn-icon { width: 44px; }
+  .form-row input, .form-row select { height: 44px; font-size: 16px; }
   .filters { padding: 10px 16px; }
   .chips { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
-  .chip-btn { height: 36px; padding: 0 12px; }
+  .chip-btn { height: 44px; padding: 0 12px; }
   .crumbs a { min-height: 44px; }
   .pills { display: flex; gap: 6px; padding: 0 16px 10px; overflow-x: auto; }
   .pill { display: inline-flex; flex-shrink: 0; align-items: center; gap: 6px; min-height: 44px; padding: 0 12px; border: 1px solid var(--border-primary); border-radius: 9999px; background: var(--bg-secondary); color: var(--text-secondary); white-space: nowrap; }
@@ -455,7 +486,7 @@ svg { flex-shrink: 0; }
   .column-active { display: flex; }
   .column-head { display: none; }
   .cards { padding: 0; overflow: visible; }
-  .card-title { padding: 10px 0; }
+  .card-title { padding: 12px 0; }
   .card-top { align-items: center; }
   .card-foot { flex-wrap: wrap; }
   .card-actions { width: 100%; }
@@ -471,7 +502,9 @@ const KANBAN_TEXT = {
     cards_one: '1 card', cards_many: '{n} cards', loading: 'Loading board…',
     no_notes: 'No notes in this folder', no_cards: 'No cards', no_matches: 'No cards match the filter',
     load_error: 'Could not load the board', move_to: 'Move to…', move_to_column: 'Move to {column}',
-    conflict: 'The card changed, reloading', move_error: 'Could not move the card', invalid_frontmatter: 'Invalid frontmatter',
+    conflict: 'The card changed, reloading', move_error: 'Could not move the card',
+    new_card: 'New card', new_card_in: 'New card in {column}', title: 'Title', column: 'Column', create: 'Create', cancel: 'Cancel',
+    create_error: 'Could not create the note', create_board: 'Create _board.md', invalid_frontmatter: 'Invalid frontmatter',
     unknown_status: 'Unknown status: {status}', invalid_board: 'Invalid _board.md, using the default columns',
     columns: { backlog: 'Backlog', todo: 'To do', doing: 'In progress', done: 'Done' },
     priorities: { low: 'Low', med: 'Medium', medium: 'Medium', high: 'High' },
@@ -481,7 +514,9 @@ const KANBAN_TEXT = {
     cards_one: '1 card', cards_many: '{n} cards', loading: 'Cargando el tablero…',
     no_notes: 'No hay notas en esta carpeta', no_cards: 'Sin cards', no_matches: 'Ninguna card coincide con el filtro',
     load_error: 'No se pudo cargar el tablero', move_to: 'Mover a…', move_to_column: 'Mover a {column}',
-    conflict: 'La card cambió, recargando', move_error: 'No se pudo mover la card', invalid_frontmatter: 'Frontmatter inválido',
+    conflict: 'La card cambió, recargando', move_error: 'No se pudo mover la card',
+    new_card: 'Nueva card', new_card_in: 'Nueva card en {column}', title: 'Título', column: 'Columna', create: 'Crear', cancel: 'Cancelar',
+    create_error: 'No se pudo crear la nota', create_board: 'Crear _board.md', invalid_frontmatter: 'Frontmatter inválido',
     unknown_status: 'Status desconocido: {status}', invalid_board: '_board.md inválido, se usan las columnas por defecto',
     columns: { backlog: 'Backlog', todo: 'Por hacer', doing: 'En curso', done: 'Hecho' },
     priorities: { low: 'Baja', med: 'Media', medium: 'Media', high: 'Alta' },
@@ -501,10 +536,14 @@ function kanbanFold(text) {
   return text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 }
 
+function kanbanYamlValue(status) {
+  return /^[\p{L}\p{N}_][\p{L}\p{N}_ .-]*$/u.test(status) ? status : JSON.stringify(status);
+}
+
 // Touches only the status line, never the rest of the frontmatter, so comments, order
 // and formatting survive. A trailing comment on that line is kept too.
 function kanbanSetStatus(content, status) {
-  const value = /^[\p{L}\p{N}_][\p{L}\p{N}_ .-]*$/u.test(status) ? status : JSON.stringify(status);
+  const value = kanbanYamlValue(status);
   const lines = content.split('\n');
   const end = lines[0].trim() === '---'
     ? lines.findIndex((line, index) => index > 0 && line.trim() === '---')
@@ -543,6 +582,8 @@ function kanbanBoard() {
     dropColumn: null,
     movingPath: null,
     notice: '',
+    newTitle: '',
+    newColumn: null,
 
     init() {
       document.documentElement.lang = text === KANBAN_TEXT.es ? 'es' : 'en';
@@ -726,7 +767,7 @@ function kanbanBoard() {
       if (this.movingPath || card.status === status || !this.canMove(card)) return;
       if (!this.board.columns.some(column => column.id === status)) return;
       this.movingPath = card.path;
-      const url = '/api/notes/' + card.path.split('/').map(encodeURIComponent).join('/');
+      const url = this.noteApiUrl(card.path);
 
       try {
         const current = await fetch(url + '?include_backlinks=false');
@@ -768,6 +809,75 @@ function kanbanBoard() {
       }
     },
 
+    openNewCard(columnId) {
+      this.newTitle = '';
+      this.newColumn = columnId;
+      this.$refs.newCard.showModal();
+    },
+
+    newCardLabel(column) {
+      return text.new_card_in.replace('{column}', this.columnLabel(column));
+    },
+
+    noteApiUrl(path) {
+      return '/api/notes/' + path.split('/').map(encodeURIComponent).join('/');
+    },
+
+    notePath(name) {
+      return this.folder ? this.folder + '/' + name : name;
+    },
+
+    // Core's save overwrites without asking, so a new note must find a free name first.
+    async freeNotePath(title) {
+      const clean = title.replace(/[\\/:*?"<>|#\p{C}]/gu, ' ').replace(/\s+/g, ' ').trim().replace(/^[_.\s]+/, '');
+      const base = clean.slice(0, 80).trim() || 'card';
+      for (let i = 1; i < 100; i++) {
+        const path = this.notePath((i === 1 ? base : base + ' ' + i) + '.md');
+        const response = await fetch(this.noteApiUrl(path) + '?include_backlinks=false');
+        if (response.status === 404) return path;
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+      }
+      throw new Error('No free note name');
+    },
+
+    async saveNewNote(path, content) {
+      const response = await fetch(this.noteApiUrl(path), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      if (response.status === 401) location.href = '/login';
+      else if (!response.ok) throw new Error('HTTP ' + response.status);
+    },
+
+    async createCard() {
+      const title = this.newTitle.trim();
+      if (!title) return;
+      this.$refs.newCard.close();
+      try {
+        const path = await this.freeNotePath(title);
+        const content = '---\nstatus: ' + kanbanYamlValue(this.newColumn) + '\n---\n# ' + title + '\n';
+        await this.saveNewNote(path, content);
+        this.activeColumn = this.newColumn;
+      } catch (e) {
+        console.error('Failed to create the card:', e);
+        this.showNotice(text.create_error);
+      }
+      await this.load();
+    },
+
+    async createBoardFile() {
+      try {
+        const path = this.notePath('_board.md');
+        const existing = await fetch(this.noteApiUrl(path) + '?include_backlinks=false');
+        if (existing.status === 404) await this.saveNewNote(path, this.board.board_template);
+      } catch (e) {
+        console.error('Failed to create _board.md:', e);
+        this.showNotice(text.create_error);
+      }
+      await this.load();
+    },
+
     warningText(card, warning) {
       if (warning === 'unknown_status') return text.unknown_status.replace('{status}', card.status);
       return text[warning] || warning;
@@ -789,6 +899,10 @@ function kanbanBoard() {
     <div class="head">
       <h1 x-text="folderName()"></h1>
       <input class="search" type="search" x-model="query" :placeholder="text.search" :aria-label="text.search">
+      <template x-if="board && !board.has_board_file">
+        <button class="btn" type="button" @click="createBoardFile()" x-text="text.create_board"></button>
+      </template>
+      <button class="btn btn-primary" type="button" x-cloak x-show="board" @click="openNewCard(activeColumn)" x-text="text.new_card"></button>
       <button class="btn btn-icon" type="button" @click="load()" :title="text.reload" :aria-label="text.reload">
         <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v5h5M20 20v-5h-5"/><path d="M5.5 15a7.5 7.5 0 0012.8 2.5L20 15M18.5 9A7.5 7.5 0 005.7 6.5L4 9"/></svg>
       </button>
@@ -834,6 +948,9 @@ function kanbanBoard() {
               <span class="dot" :class="dotClass(column, index)"></span>
               <h2 x-text="columnLabel(column)"></h2>
               <span class="column-count" x-text="columnCards(column.id).length"></span>
+              <button class="column-add" type="button" @click="openNewCard(column.id)" :title="newCardLabel(column)" :aria-label="newCardLabel(column)">
+                <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              </button>
             </div>
             <div class="cards">
               <p class="empty-column" style="margin: 0" x-show="columnCards(column.id).length === 0" x-text="query || activeTag ? text.no_matches : text.no_cards"></p>
@@ -898,6 +1015,28 @@ function kanbanBoard() {
       </main>
     </div>
   </template>
+
+  <dialog x-ref="newCard">
+    <form @submit.prevent="createCard()">
+      <h2 x-text="text.new_card"></h2>
+      <label class="form-row">
+        <span x-text="text.title"></span>
+        <input type="text" required maxlength="200" x-model="newTitle">
+      </label>
+      <label class="form-row">
+        <span x-text="text.column"></span>
+        <select x-model="newColumn">
+          <template x-for="column in board ? board.columns : []" :key="column.id">
+            <option :value="column.id" :selected="column.id === newColumn" x-text="columnLabel(column)"></option>
+          </template>
+        </select>
+      </label>
+      <div class="form-actions">
+        <button class="btn" type="button" @click="$refs.newCard.close()" x-text="text.cancel"></button>
+        <button class="btn btn-primary" type="submit" x-text="text.create"></button>
+      </div>
+    </form>
+  </dialog>
 
   <div class="toast" role="status" x-cloak x-show="notice" x-text="notice"></div>
 </body>
