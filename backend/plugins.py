@@ -24,6 +24,9 @@ from fastapi import APIRouter
 
 logger = logging.getLogger("uvicorn.error")
 
+# Where the app can show a folder action.
+UI_ACTION_PLACES = {"homepage", "breadcrumb", "sidebar"}
+
 
 @dataclass(frozen=True)
 class HookSpec:
@@ -363,10 +366,22 @@ class Plugin:
             and "\\" not in url
             and isinstance(action.get("id"), str)
             and isinstance(action.get("label"), (str, dict))
+            and self._valid_ui_file(action.get("when_file"))
+            and self._valid_ui_file(action.get("unless_file"))
+            and self._valid_ui_places(action.get("places"))
         )
         if not valid:
             logger.warning("Plugin '%s' declared an invalid UI action, ignoring it: %r", plugin_id, action)
         return valid
+
+    @staticmethod
+    def _valid_ui_file(name: Any) -> bool:
+        """A file directly inside the folder, or None when the action sets no condition."""
+        return name is None or (isinstance(name, str) and name != "" and "/" not in name and "\\" not in name)
+
+    @staticmethod
+    def _valid_ui_places(places: Any) -> bool:
+        return places is None or (isinstance(places, list) and set(places) <= UI_ACTION_PLACES)
 
     def _load_config(self) -> Dict[str, bool]:
         """Load plugin configuration from JSON file"""
