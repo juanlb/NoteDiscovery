@@ -6,6 +6,9 @@ Trigger: open /api/plugins/kanban_board/board?folder=<folder>
 Install: cp plugins/contrib/kanban_board.py plugins/
 Author:  @juanlb
 Caveats: Only reads the notes directly inside the folder, never subfolders.
+         Moving a card edits only the `status:` line, through core's save endpoint,
+         so save hooks and the index behave as with a normal edit. Core saves with
+         LF line endings, so a move also converts a CRLF note to LF, as any save does.
          Reads frontmatter straight from disk, because plugins have no access to
          on_note_load. Not compatible with plugins that transform note content on
          disk (for example, encryption): those cards land in the first column.
@@ -417,6 +420,20 @@ svg { flex-shrink: 0; }
 .file { font: 10px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--text-tertiary); overflow-wrap: anywhere; }
 .warning { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--warning); overflow-wrap: anywhere; }
 
+.card[draggable="true"] { cursor: grab; }
+.card-moving { opacity: .5; }
+.column-drop { border-color: var(--accent-primary); box-shadow: inset 0 0 0 1px var(--accent-primary); }
+.card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.card-actions { display: flex; flex-shrink: 0; align-items: center; gap: 6px; }
+.move-select { max-width: 110px; height: 24px; border: 1px solid var(--border-primary); border-radius: 6px; background: var(--bg-secondary); color: var(--text-secondary); font: inherit; font-size: 11px; cursor: pointer; }
+.move-next { display: none; }
+.toast { position: fixed; left: 50%; bottom: 20px; z-index: 10; transform: translateX(-50%); max-width: calc(100vw - 32px); padding: 8px 14px; border: 1px solid var(--border-primary); border-radius: 8px; background: var(--bg-secondary); color: var(--text-primary); box-shadow: var(--shadow-md); }
+@media (hover: hover) and (min-width: 641px) {
+  /* Out of the way until needed, and still reachable with the keyboard. */
+  .move-select { opacity: 0; }
+  .card:hover .move-select, .move-select:focus { opacity: 1; }
+}
+
 .state { margin: auto; padding: 32px 20px; color: var(--text-tertiary); text-align: center; }
 
 @media (max-width: 640px) {
@@ -440,6 +457,11 @@ svg { flex-shrink: 0; }
   .cards { padding: 0; overflow: visible; }
   .card-title { padding: 10px 0; }
   .card-top { align-items: center; }
+  .card-foot { flex-wrap: wrap; }
+  .card-actions { width: 100%; }
+  .move-select { flex: 1; max-width: none; height: 44px; font-size: 14px; }
+  .move-next { display: inline-flex; flex: 2; min-width: 0; height: 44px; }
+  .move-next span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 </style>
 <script>
@@ -448,7 +470,8 @@ const KANBAN_TEXT = {
     back: 'Back to notes', root: 'All notes', search: 'Search cards', reload: 'Reload', all: 'All',
     cards_one: '1 card', cards_many: '{n} cards', loading: 'Loading board…',
     no_notes: 'No notes in this folder', no_cards: 'No cards', no_matches: 'No cards match the filter',
-    load_error: 'Could not load the board', invalid_frontmatter: 'Invalid frontmatter',
+    load_error: 'Could not load the board', move_to: 'Move to…', move_to_column: 'Move to {column}',
+    conflict: 'The card changed, reloading', move_error: 'Could not move the card', invalid_frontmatter: 'Invalid frontmatter',
     unknown_status: 'Unknown status: {status}', invalid_board: 'Invalid _board.md, using the default columns',
     columns: { backlog: 'Backlog', todo: 'To do', doing: 'In progress', done: 'Done' },
     priorities: { low: 'Low', med: 'Medium', medium: 'Medium', high: 'High' },
@@ -457,7 +480,8 @@ const KANBAN_TEXT = {
     back: 'Volver a las notas', root: 'Todas las notas', search: 'Buscar cards', reload: 'Recargar', all: 'Todas',
     cards_one: '1 card', cards_many: '{n} cards', loading: 'Cargando el tablero…',
     no_notes: 'No hay notas en esta carpeta', no_cards: 'Sin cards', no_matches: 'Ninguna card coincide con el filtro',
-    load_error: 'No se pudo cargar el tablero', invalid_frontmatter: 'Frontmatter inválido',
+    load_error: 'No se pudo cargar el tablero', move_to: 'Mover a…', move_to_column: 'Mover a {column}',
+    conflict: 'La card cambió, recargando', move_error: 'No se pudo mover la card', invalid_frontmatter: 'Frontmatter inválido',
     unknown_status: 'Status desconocido: {status}', invalid_board: '_board.md inválido, se usan las columnas por defecto',
     columns: { backlog: 'Backlog', todo: 'Por hacer', doing: 'En curso', done: 'Hecho' },
     priorities: { low: 'Baja', med: 'Media', medium: 'Media', high: 'Alta' },
@@ -477,6 +501,31 @@ function kanbanFold(text) {
   return text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 }
 
+// Touches only the status line, never the rest of the frontmatter, so comments, order
+// and formatting survive. A trailing comment on that line is kept too.
+function kanbanSetStatus(content, status) {
+  const value = /^[\p{L}\p{N}_][\p{L}\p{N}_ .-]*$/u.test(status) ? status : JSON.stringify(status);
+  const lines = content.split('\n');
+  const end = lines[0].trim() === '---'
+    ? lines.findIndex((line, index) => index > 0 && line.trim() === '---')
+    : -1;
+
+  if (end < 0) return '---\nstatus: ' + value + '\n---\n' + content;
+
+  let found = false;
+  for (let i = 1; i < end; i++) {
+    const match = /^(status[ \t]*:[ \t]*)(.*?)([ \t]+#.*)?$/.exec(lines[i]);
+    if (match) {
+      // `status:` with no value has no space after the colon yet.
+      const prefix = /\s$/.test(match[1]) ? match[1] : match[1] + ' ';
+      lines[i] = prefix + value + (match[3] || '');
+      found = true;
+    }
+  }
+  if (!found) lines.splice(end, 0, 'status: ' + value);
+  return lines.join('\n');
+}
+
 function kanbanBoard() {
   const locale = kanbanLocale();
   const text = locale.toLowerCase().startsWith('es') ? KANBAN_TEXT.es : KANBAN_TEXT.en;
@@ -490,6 +539,10 @@ function kanbanBoard() {
     query: '',
     activeTag: null,
     activeColumn: null,
+    draggedPath: null,
+    dropColumn: null,
+    movingPath: null,
+    notice: '',
 
     init() {
       document.documentElement.lang = text === KANBAN_TEXT.es ? 'es' : 'en';
@@ -634,6 +687,87 @@ function kanbanBoard() {
       return this.board.columns.find(column => column.id === card.column).done;
     },
 
+    // The status of a card with broken YAML cannot be read back, so a move would
+    // change the file and leave the card where it is.
+    canMove(card) {
+      return !card.warnings.includes('invalid_frontmatter');
+    },
+
+    moveTargets(card) {
+      return this.board.columns.filter(column => column.id !== card.status);
+    },
+
+    nextColumn(card) {
+      const columns = this.board.columns;
+      return columns[columns.findIndex(column => column.id === card.column) + 1];
+    },
+
+    moveToLabel(column) {
+      return text.move_to_column.replace('{column}', this.columnLabel(column));
+    },
+
+    showNotice(message) {
+      this.notice = message;
+      clearTimeout(this.noticeTimer);
+      this.noticeTimer = setTimeout(() => { this.notice = ''; }, 4000);
+    },
+
+    onDrop(columnId) {
+      const card = this.board.cards.find(c => c.path === this.draggedPath);
+      this.draggedPath = null;
+      this.dropColumn = null;
+      if (card && card.column !== columnId) this.move(card, columnId);
+    },
+
+    // Two checks keep a move from overwriting someone else's edit. The mtime covers
+    // the time since the board loaded, and base_hash makes core answer 409 for a
+    // write that lands between this GET and the POST.
+    async move(card, status) {
+      if (this.movingPath || card.status === status || !this.canMove(card)) return;
+      if (!this.board.columns.some(column => column.id === status)) return;
+      this.movingPath = card.path;
+      const url = '/api/notes/' + card.path.split('/').map(encodeURIComponent).join('/');
+
+      try {
+        const current = await fetch(url + '?include_backlinks=false');
+        if (current.status === 401) {
+          location.href = '/login';
+          return;
+        }
+        if (current.status === 404) {
+          this.showNotice(text.conflict);
+          return;
+        }
+        if (!current.ok) throw new Error('HTTP ' + current.status);
+        const note = await current.json();
+        if (note.metadata.modified !== card.mtime) {
+          this.showNotice(text.conflict);
+          return;
+        }
+
+        const saved = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: kanbanSetStatus(note.content, status), base_hash: note.hash }),
+        });
+        if (saved.status === 401) {
+          location.href = '/login';
+          return;
+        }
+        if (saved.status === 409) {
+          this.showNotice(text.conflict);
+          return;
+        }
+        if (!saved.ok) throw new Error('HTTP ' + saved.status);
+      } catch (e) {
+        console.error('Failed to move the card:', e);
+        this.showNotice(text.move_error);
+      } finally {
+        this.movingPath = null;
+        await this.load();
+      }
+    },
+
     warningText(card, warning) {
       if (warning === 'unknown_status') return text.unknown_status.replace('{status}', card.status);
       return text[warning] || warning;
@@ -692,7 +826,10 @@ function kanbanBoard() {
 
       <main class="board" x-show="board.cards.length > 0">
         <template x-for="(column, index) in board.columns" :key="column.id">
-          <section class="column" :class="activeColumn === column.id && 'column-active'">
+          <section class="column"
+                   :class="{ 'column-active': activeColumn === column.id, 'column-drop': dropColumn === column.id }"
+                   @dragover.prevent="dropColumn = column.id"
+                   @drop.prevent="onDrop(column.id)">
             <div class="column-head">
               <span class="dot" :class="dotClass(column, index)"></span>
               <h2 x-text="columnLabel(column)"></h2>
@@ -701,7 +838,11 @@ function kanbanBoard() {
             <div class="cards">
               <p class="empty-column" style="margin: 0" x-show="columnCards(column.id).length === 0" x-text="query || activeTag ? text.no_matches : text.no_cards"></p>
               <template x-for="card in columnCards(column.id)" :key="card.path">
-                <article class="card" :class="isDone(card) && 'card-done'">
+                <article class="card"
+                         :class="{ 'card-done': isDone(card), 'card-moving': movingPath === card.path || draggedPath === card.path }"
+                         :draggable="canMove(card)"
+                         @dragstart="draggedPath = card.path; $event.dataTransfer.effectAllowed = 'move'; $event.dataTransfer.setData('text/plain', card.path)"
+                         @dragend="draggedPath = null; dropColumn = null">
                   <div class="card-top">
                     <a class="card-title" :href="noteUrl(card)" draggable="false" x-text="card.title"></a>
                     <template x-if="priorityValue(card)">
@@ -732,7 +873,23 @@ function kanbanBoard() {
                       <span x-text="warningText(card, warning)"></span>
                     </p>
                   </template>
-                  <span class="file" x-text="card.name"></span>
+                  <div class="card-foot">
+                    <span class="file" x-text="card.name"></span>
+                    <div class="card-actions" x-show="canMove(card)">
+                      <select class="move-select" :aria-label="text.move_to" @change="move(card, $event.target.value); $event.target.value = ''">
+                        <option value="" selected disabled x-text="text.move_to"></option>
+                        <template x-for="target in moveTargets(card)" :key="target.id">
+                          <option :value="target.id" x-text="columnLabel(target)"></option>
+                        </template>
+                      </select>
+                      <template x-if="nextColumn(card)">
+                        <button class="btn move-next" type="button" @click="move(card, nextColumn(card).id)">
+                          <span x-text="moveToLabel(nextColumn(card))"></span>
+                          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+                        </button>
+                      </template>
+                    </div>
+                  </div>
                 </article>
               </template>
             </div>
@@ -741,6 +898,8 @@ function kanbanBoard() {
       </main>
     </div>
   </template>
+
+  <div class="toast" role="status" x-cloak x-show="notice" x-text="notice"></div>
 </body>
 </html>
 """
