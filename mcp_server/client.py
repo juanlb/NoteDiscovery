@@ -227,6 +227,16 @@ class NoteDiscoveryClient:
             data={"content": content, "add_timestamp": add_timestamp}
         )
     
+    def list_plugins(self) -> APIResponse:
+        """List plugins, with the MCP tools of the enabled ones."""
+        return self._request("GET", "/api/plugins")
+
+    def call_plugin_tool(self, plugin_id: str, tool_name: str, arguments: dict[str, Any]) -> APIResponse:
+        """Send an MCP tool call to the plugin that declared the tool."""
+        plugin = urllib.parse.quote(plugin_id, safe="")
+        tool = urllib.parse.quote(tool_name, safe="")
+        return self._request("POST", f"/api/plugins/{plugin}/mcp/{tool}", data=arguments)
+
     def edit_note(self, path: str, old_str: str, new_str: str) -> APIResponse:
         """
         Replace one exact occurrence of a text in an existing note.

@@ -220,6 +220,11 @@ The MCP server provides these tools to AI assistants:
 | `health_check` | Verify server connectivity |
 | `get_config` | Get server config (name, version, enabled features, autosave delay) |
 
+### Plugin Tools
+
+Enabled plugins can add their own tools, which appear next to the ones above. See
+[PLUGINS.md](PLUGINS.md#mcp-tools).
+
 ## Tool Details
 
 ### Pagination with `limit` and `offset`

@@ -11,16 +11,20 @@ Plugins may also expose:
   - setup(ctx)      receive a PluginContext (notes_dir, config, logger)
   - get_routes()    return an APIRouter mounted at /api/plugins/<plugin_id>
   - get_ui()        declare UI actions the app renders, as data rather than code
+  - get_mcp_tools() declare MCP tools, served by the plugin's own routes
 """
 
 import json
 import logging
 import importlib.util
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Dict, Optional
+from typing import Any, Callable, List, Dict, Optional
 
 from fastapi import APIRouter
+
+from .utils import get_note_content, save_note
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -66,6 +70,10 @@ class PluginContext:
     plugins_dir: Path
     config: Dict[str, Any]
     logger: logging.Logger
+    # Same paths as the notes API, so hooks run and the index stays current. Writing
+    # the file directly skips both, which breaks plugins that transform content.
+    read_note: Optional[Callable[[str], Optional[str]]] = None
+    write_note: Optional[Callable[[str, str], bool]] = None
 
 
 class Plugin:
@@ -101,6 +109,16 @@ class Plugin:
 
         Plugins hand over data, never code: the app only ever shows a link to one
         of the plugin's own routes. See documentation/PLUGINS.md.
+        """
+        return None
+
+    def get_mcp_tools(self) -> List[Dict] | None:
+        """
+        Declare MCP tools, or None.
+
+        The MCP server sends each call to POST /api/plugins/<plugin_id>/mcp/<tool_name>,
+        so the plugin serves it from get_routes(). Tool names must start with
+        "<plugin_id>_". See documentation/PLUGINS.md.
         """
         return None
 
@@ -247,6 +265,8 @@ class PluginManager:
                 # Child of uvicorn.error so plugin output lands in the server
                 # log but is attributable to the plugin that produced it.
                 logger=logging.getLogger(f"uvicorn.error.plugins.{plugin_id}"),
+                read_note=self.read_note,
+                write_note=self.write_note,
             ))
         except Exception as e:
             logger.error("Plugin %s failed during setup: %s", plugin_id, e)
@@ -337,6 +357,9 @@ class Plugin:
             ui = self._plugin_ui(plugin_id, plugin) if plugin.enabled else None
             if ui:
                 entry["ui"] = ui
+            mcp_tools = self._plugin_mcp_tools(plugin_id, plugin) if plugin.enabled else None
+            if mcp_tools:
+                entry["mcp_tools"] = mcp_tools
             plugins.append(entry)
         return plugins
 
@@ -362,10 +385,10 @@ class Plugin:
         valid = (
             isinstance(url, str)
             and url.startswith(prefix)
-            and ".." not in url
-            and "\\" not in url
+            # Browsers normalize %2e%2e, so any escape could hide a way out of the prefix.
+            and not any(c in url for c in ("..", "\\", "%"))
             and isinstance(action.get("id"), str)
-            and isinstance(action.get("label"), (str, dict))
+            and self._valid_ui_label(action.get("label"))
             and self._valid_ui_file(action.get("when_file"))
             and self._valid_ui_file(action.get("unless_file"))
             and self._valid_ui_places(action.get("places"))
@@ -375,6 +398,12 @@ class Plugin:
         return valid
 
     @staticmethod
+    def _valid_ui_label(label: Any) -> bool:
+        if isinstance(label, dict):
+            return all(isinstance(text, str) for text in label.values())
+        return isinstance(label, str)
+
+    @staticmethod
     def _valid_ui_file(name: Any) -> bool:
         """A file directly inside the folder, or None when the action sets no condition."""
         return name is None or (isinstance(name, str) and name != "" and "/" not in name and "\\" not in name)
@@ -382,6 +411,50 @@ class Plugin:
     @staticmethod
     def _valid_ui_places(places: Any) -> bool:
         return places is None or (isinstance(places, list) and set(places) <= UI_ACTION_PLACES)
+
+    def _plugin_mcp_tools(self, plugin_id: str, plugin: Plugin) -> List[Dict]:
+        """The plugin's valid MCP tool definitions."""
+        get_tools = getattr(plugin, "get_mcp_tools", None)
+        if not callable(get_tools):
+            return []
+        try:
+            tools = get_tools() or []
+            valid = [t for t in tools if self._valid_mcp_tool(plugin_id, t)]
+        except Exception as e:
+            logger.error("Plugin %s failed to provide MCP tools: %s", plugin_id, e)
+            return []
+        return [
+            {"name": t["name"], "description": t["description"], "inputSchema": t["inputSchema"]}
+            for t in valid
+        ]
+
+    def _valid_mcp_tool(self, plugin_id: str, tool: Any) -> bool:
+        """The name prefix keeps a plugin from shadowing another plugin's tools."""
+        valid = (
+            isinstance(tool, dict)
+            and isinstance(tool.get("name"), str)
+            and re.fullmatch(re.escape(plugin_id) + r"_[a-z0-9_]+", tool["name"]) is not None
+            and isinstance(tool.get("description"), str)
+            and isinstance(tool.get("inputSchema"), dict)
+        )
+        if not valid:
+            logger.warning("Plugin '%s' declared an invalid MCP tool, ignoring it: %r", plugin_id, tool)
+        return valid
+
+    def read_note(self, note_path: str) -> Optional[str]:
+        """A note's content as GET /api/notes returns it, or None if it does not exist."""
+        content = get_note_content(str(self.notes_dir), note_path)
+        if content is None:
+            return None
+        return self.dispatch("on_note_load", note_path=note_path, content=content)
+
+    def write_note(self, note_path: str, content: str) -> bool:
+        """Create or replace a note with the same hooks as POST /api/notes."""
+        notes_dir = str(self.notes_dir)
+        if get_note_content(notes_dir, note_path) is None:
+            content = self.dispatch("on_note_create", note_path=note_path, initial_content=content)
+        content = self.dispatch("on_note_save", note_path=note_path, content=content)
+        return save_note(notes_dir, note_path, content)
 
     def _load_config(self) -> Dict[str, bool]:
         """Load plugin configuration from JSON file"""
