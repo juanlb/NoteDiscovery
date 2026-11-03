@@ -93,7 +93,7 @@ Board settings for this folder. The kanban_board plugin ignores this text.
 """
 
 ISO_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-HEADING_PATTERN = re.compile(r"^#[ \t]+(.+?)[ \t]*#*[ \t]*$")
+HEADING_PATTERN = re.compile(r"^#[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$")
 FENCE_PATTERN = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
 
@@ -128,7 +128,8 @@ def _parse_yaml(frontmatter: str | None) -> tuple[dict, bool]:
         return {}, True
     try:
         data = yaml.load(frontmatter, Loader=yaml.BaseLoader)
-    except yaml.YAMLError:
+    # RecursionError: deeply nested input, which one note must not turn into a 500.
+    except (yaml.YAMLError, RecursionError):
         return {}, False
     if data is None or data == "":
         return {}, True
@@ -188,7 +189,7 @@ def _read_board_config(folder: Path) -> dict:
     columns = _string_list(raw.get("columns")) or DEFAULT_COLUMNS
     labels = raw.get("labels") if isinstance(raw.get("labels"), dict) else {}
     # An empty list is a valid choice: a board with no finished columns.
-    done = _string_list(raw["done"]) if "done" in raw else DEFAULT_DONE
+    done = _string_list(raw["done"]) if isinstance(raw.get("done"), list) else DEFAULT_DONE
     raw_fields = raw.get("fields") if isinstance(raw.get("fields"), dict) else DEFAULT_FIELDS
 
     return {
@@ -214,7 +215,10 @@ def _read_card(path: Path, rel_path: str, config: dict) -> dict:
     text = _read_head(path)
     frontmatter, body = _split_frontmatter(text)
     values, valid = _parse_yaml(frontmatter)
-    warnings = [] if valid else ["invalid_frontmatter"]
+    # Frontmatter past the read limit looks absent, and a move would then add a second
+    # block in front of the real one.
+    truncated = frontmatter is None and len(text) >= MAX_READ_CHARS and text.split("\n")[0].strip() == "---"
+    warnings = [] if valid and not truncated else ["invalid_frontmatter"]
 
     column_ids = [column["id"] for column in config["columns"]]
     status = values.get("status")
@@ -440,7 +444,7 @@ svg { flex-shrink: 0; }
 .column-add { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--text-tertiary); }
 .column-add:hover { background: var(--bg-hover); color: var(--text-primary); }
 dialog { width: min(420px, calc(100vw - 32px)); padding: 16px; border: 1px solid var(--border-primary); border-radius: 8px; background: var(--bg-primary); color: var(--text-primary); box-shadow: var(--shadow-md); }
-dialog::backdrop { background: rgba(0, 0, 0, .4); }
+dialog::backdrop { background: color-mix(in srgb, var(--bg-primary) 60%, transparent); }
 dialog h2 { margin: 0 0 12px; font-size: 16px; }
 .form-row { display: block; margin-bottom: 12px; font-size: 12px; color: var(--text-secondary); }
 .form-row input, .form-row select { display: block; width: 100%; height: 38px; margin-top: 4px; padding: 0 8px; border: 1px solid var(--border-primary); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary); font: inherit; font-size: 14px; }
@@ -573,6 +577,7 @@ const KANBAN_TEXT = {
     hint_fields: 'The first list is the card priority. The first list and the first date sort the cards.',
     comments_warning: 'Saving removes the comments inside the board block of _board.md.',
     board_invalid_edit: 'The _board.md file has invalid YAML. Fix it as text first.', open_board_file: 'Open _board.md',
+    tag_invalid: 'The tag {name} has characters that are not allowed. Use letters, numbers, spaces and _ - . / +',
     field_reserved: 'A field cannot be named {name}.', field_duplicate: 'There are two fields named {name}.',
     field_needs_values: 'The list {name} needs at least one value.', needs_column: 'The board needs at least one column.',
     settings_conflict: '_board.md changed while you were editing. Nothing was saved, and your changes are still here.',
@@ -600,6 +605,7 @@ const KANBAN_TEXT = {
     hint_fields: 'La primera lista es la prioridad de la card. La primera lista y la primera fecha ordenan las cards.',
     comments_warning: 'Al guardar se pierden los comentarios del bloque board de _board.md.',
     board_invalid_edit: 'El archivo _board.md tiene YAML inválido. Primero arreglalo como texto.', open_board_file: 'Abrir _board.md',
+    tag_invalid: 'El tag {name} tiene caracteres no permitidos. Usá letras, números, espacios y _ - . / +',
     field_reserved: 'Un campo no puede llamarse {name}.', field_duplicate: 'Hay dos campos llamados {name}.',
     field_needs_values: 'La lista {name} necesita al menos un valor.', needs_column: 'El tablero necesita al menos una columna.',
     settings_conflict: '_board.md cambió mientras editabas. No se guardó nada, y tus cambios siguen acá.',
@@ -634,13 +640,17 @@ function kanbanYamlValue(status) {
 }
 
 function kanbanFrontmatterEnd(lines) {
-  if (lines[0].trim() !== '---') return -1;
+  // A BOM hides the frontmatter from core and from the Python side of this plugin.
+  if (lines[0].startsWith('﻿') || lines[0].trim() !== '---') return -1;
   return lines.findIndex((line, index) => index > 0 && line.trim() === '---');
 }
 
-// Touches only this field's line, never the rest of the frontmatter, so comments, order
-// and formatting survive. A trailing comment on that line is kept too. An empty value
-// removes the line.
+// Lines that belong to the value of the key above them.
+const KANBAN_CONTINUATION = /^(?:[ \t]+\S|-[ \t])/;
+
+// Touches only this field, never the rest of the frontmatter, so comments, order and
+// formatting survive. A trailing comment on its line is kept too. An empty value removes
+// the field, including a value that spans several lines.
 function kanbanSetField(content, key, newValue) {
   const value = newValue ? kanbanYamlValue(newValue) : '';
   const lines = content.split('\n');
@@ -649,19 +659,25 @@ function kanbanSetField(content, key, newValue) {
   if (end < 0) return value ? '---\n' + key + ': ' + value + '\n---\n' + content : content;
 
   const name = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = new RegExp('^(' + name + '[ \\t]*:[ \\t]*)(.*?)([ \\t]+#.*)?$');
+  const pattern = new RegExp('^(' + name + '[ \\t]*:[ \\t]*)("(?:[^"\\\\]|\\\\.)*"|\'[^\']*\'|.*?)([ \\t]+#.*)?$');
+  const edited = lines.slice(0, 1);
   let found = false;
-  const edited = lines.flatMap((line, index) => {
-    const match = index > 0 && index < end ? pattern.exec(line) : null;
-    if (!match) return [line];
+  for (let i = 1; i < end; i++) {
+    const match = pattern.exec(lines[i]);
+    if (!match) {
+      edited.push(lines[i]);
+      continue;
+    }
     found = true;
-    if (!value) return [];
-    // `status:` with no value has no space after the colon yet.
-    const prefix = /\s$/.test(match[1]) ? match[1] : match[1] + ' ';
-    return [prefix + value + (match[3] || '')];
-  });
-  if (!found && value) edited.splice(end, 0, key + ': ' + value);
-  return edited.join('\n');
+    while (i + 1 < end && KANBAN_CONTINUATION.test(lines[i + 1])) i++;
+    if (value) {
+      // `status:` with no value has no space after the colon yet.
+      const prefix = /\s$/.test(match[1]) ? match[1] : match[1] + ' ';
+      edited.push(prefix + value + (match[3] || ''));
+    }
+  }
+  if (!found && value) edited.push(key + ': ' + value);
+  return edited.concat(lines.slice(end)).join('\n');
 }
 
 // Tags are written unquoted, because core's parse_tags keeps quotes as part of the tag.
@@ -670,6 +686,11 @@ function kanbanParseTags(text) {
     .map(tag => tag.replace(/[\[\]]/g, '').trim().replace(/^#+/, '').trim().toLowerCase())
     .filter(Boolean);
   return [...new Set(tags)];
+}
+
+// Tags stay plain YAML scalars, because core's parser reads quotes as part of the tag.
+function kanbanValidTag(tag) {
+  return /^[\p{L}\p{N}_][\p{L}\p{N}_ .\/+-]*$/u.test(tag);
 }
 
 function kanbanSetTags(content, tags) {
@@ -687,10 +708,8 @@ function kanbanSetTags(content, tags) {
 
   // A multi-line list ends at its last item, so a comment before the next key survives.
   let last = start;
-  if (/^tags[ \t]*:[ \t]*(#.*)?$/.test(lines[start])) {
-    for (let i = start + 1; i < end && /^\s*(-|#|$)/.test(lines[i]); i++) {
-      if (/^\s*-/.test(lines[i])) last = i;
-    }
+  for (let i = start + 1; i < end && /^(?:\s|-|#|$)/.test(lines[i]); i++) {
+    if (KANBAN_CONTINUATION.test(lines[i]) && !/^\s*#/.test(lines[i])) last = i;
   }
   lines.splice(start, last - start + 1, ...(value ? [value] : []));
   return lines.join('\n');
@@ -1061,7 +1080,9 @@ function kanbanBoard() {
       const response = await fetch(this.noteApiUrl(path), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
+        // Core ignores base_hash for a new note and answers 409 if the note now exists,
+        // which keeps two tabs creating the same name from overwriting each other.
+        body: JSON.stringify({ content, base_hash: 'new' }),
       });
       if (response.status === 401) location.href = '/login';
       else if (!response.ok) throw new Error('HTTP ' + response.status);
@@ -1195,13 +1216,18 @@ function kanbanBoard() {
       const edit = this.edit;
       if (edit.raw) return edit.body;
 
-      let content = edit.head + edit.body;
+      // A closing fence on the last line has no newline yet to separate it from the body.
+      const separator = edit.head && !edit.head.endsWith('\n') && edit.body ? '\n' : '';
+      let content = edit.head + separator + edit.body;
       if (edit.status && edit.status !== edit.original.status) {
         content = kanbanSetField(content, 'status', edit.status);
       }
       for (const field of this.board.fields) {
-        const value = edit.fields[field.id].trim();
-        if (value !== edit.original.fields[field.id]) content = kanbanSetField(content, field.id, value);
+        // The board can gain a field while the panel is open, through a reload.
+        const value = (edit.fields[field.id] || '').trim();
+        if (value !== (edit.original.fields[field.id] || '').trim()) {
+          content = kanbanSetField(content, field.id, value);
+        }
       }
       const tags = kanbanParseTags(edit.tagsText);
       const sameTags = [...tags].sort().join() === [...kanbanParseTags(edit.original.tagsText)].sort().join();
@@ -1210,6 +1236,13 @@ function kanbanBoard() {
 
     async saveEditor() {
       if (this.edit.loading || this.edit.saving || this.edit.conflict) return;
+      this.edit.error = '';
+      const original = kanbanParseTags(this.edit.original.tagsText || '');
+      const badTag = kanbanParseTags(this.edit.tagsText || '').find(tag => !original.includes(tag) && !kanbanValidTag(tag));
+      if (badTag && !this.edit.raw) {
+        this.edit.error = text.tag_invalid.replace('{name}', badTag);
+        return;
+      }
       const content = this.editedContent();
       if (content === this.edit.content) {
         this.$refs.editor.close();
@@ -1420,19 +1453,12 @@ function kanbanBoard() {
       settings.saving = true;
       const path = this.notePath('_board.md');
       try {
-        // Without a file there is no hash to compare, so check that it is still missing.
-        if (!settings.hasFile) {
-          const existing = await fetch(this.noteApiUrl(path) + '?include_backlinks=false');
-          if (existing.status !== 404) {
-            settings.conflict = true;
-            return;
-          }
-        }
         const content = kanbanSetBoardBlock(settings.content, kanbanBoardBlock(schema.columns, schema.fields));
         const response = await fetch(this.noteApiUrl(path), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(settings.hash ? { content, base_hash: settings.hash } : { content }),
+          // Without a file, core answers 409 if one appeared since the panel opened.
+          body: JSON.stringify({ content, base_hash: settings.hash || 'new' }),
         });
         if (response.status === 401) {
           location.href = '/login';
