@@ -36,6 +36,12 @@ const CONFIG = {
 };
 
 /** Heroicons outline "share" (same d= as shared-note icon in the file tree) */
+// Icons a plugin UI action can ask for by name. Plugins send data, not markup.
+const PLUGIN_ACTION_ICONS = {
+    board: 'M9 4H5a1 1 0 00-1 1v14a1 1 0 001 1h4a1 1 0 001-1V5a1 1 0 00-1-1zm10 0h-4a1 1 0 00-1 1v8a1 1 0 001 1h4a1 1 0 001-1V5a1 1 0 00-1-1z',
+    link: 'M14 5h5v5m0-5l-8 8M10 5H6a1 1 0 00-1 1v12a1 1 0 001 1h12a1 1 0 001-1v-4',
+};
+
 const SHARE_ICON_PATH = 'M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z';
 
 /**
@@ -439,6 +445,7 @@ function noteApp() {
         
         // Stats plugin state
         statsPluginEnabled: false,
+        pluginFolderActions: [],
         noteStats: null,
         statsExpanded: false,
         
@@ -795,7 +802,7 @@ function noteApp() {
             await this.loadNotes();
             await this.loadSharedNotePaths();
             await this.loadTemplates();
-            await this.checkStatsPlugin();
+            await this.loadPlugins();
             this.loadLocalSettings();
             
             // Parse URL and load specific note if provided
@@ -2902,6 +2909,19 @@ function noteApp() {
                             </span>
                         </div>
                         <div class="hover-buttons flex gap-1 transition-opacity absolute right-2 top-1/2 transform -translate-y-1/2" style="opacity: 0; pointer-events: none; background: linear-gradient(to right, transparent, var(--bg-hover) 20%, var(--bg-hover)); padding-left: 20px;" onclick="event.stopPropagation()">
+                            ${this.pluginFolderActions.map(action => `
+                            <a
+                                href="${esc(this.pluginActionUrl(action, folder.path))}"
+                                draggable="false"
+                                class="px-1 py-0.5 text-xs rounded hover:brightness-110"
+                                style="background-color: var(--bg-tertiary); color: var(--text-secondary);"
+                                title="${esc(this.pluginActionLabel(action))}"
+                                aria-label="${esc(this.pluginActionLabel(action))}"
+                            >
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${esc(this.pluginActionIcon(action))}"></path>
+                                </svg>
+                            </a>`).join('')}
                             <button 
                                 data-path="${esc(folder.path)}"
                                 onclick="window.$root.handleNewItemClick(this, event)"
@@ -7934,10 +7954,11 @@ function noteApp() {
         },
         
         // Check if stats plugin is enabled
-        async checkStatsPlugin() {
+        async loadPlugins() {
             try {
                 const response = await fetch('/api/plugins');
                 const data = await response.json();
+                this.pluginFolderActions = data.plugins.flatMap(p => p.ui?.folder_actions || []);
                 const statsPlugin = data.plugins.find(p => p.id === 'note_stats');
                 this.statsPluginEnabled = statsPlugin && statsPlugin.enabled;
                 
@@ -7946,9 +7967,24 @@ function noteApp() {
                     this.calculateStats();
                 }
             } catch (error) {
-                console.error('Failed to check stats plugin:', error);
+                console.error('Failed to load plugins:', error);
                 this.statsPluginEnabled = false;
+                this.pluginFolderActions = [];
             }
+        },
+
+        pluginActionLabel(action) {
+            if (typeof action.label === 'string') return action.label;
+            const language = this.currentLocale.split('-')[0];
+            return action.label[language] || action.label.en || action.id;
+        },
+
+        pluginActionUrl(action, folderPath) {
+            return action.url.replace('{folder}', encodeURIComponent(folderPath));
+        },
+
+        pluginActionIcon(action) {
+            return PLUGIN_ACTION_ICONS[action.icon] || PLUGIN_ACTION_ICONS.link;
         },
         
         // Calculate note statistics (client-side)

@@ -10,6 +10,7 @@ subject as-is, so observing and transforming plugins can coexist on one hook.
 Plugins may also expose:
   - setup(ctx)      receive a PluginContext (notes_dir, config, logger)
   - get_routes()    return an APIRouter mounted at /api/plugins/<plugin_id>
+  - get_ui()        declare UI actions the app renders, as data rather than code
 """
 
 import json
@@ -88,6 +89,15 @@ class Plugin:
         Routes are mounted at startup regardless of enabled state, so check
         self.enabled inside the handler if the endpoint should go quiet when
         the plugin is toggled off.
+        """
+        return None
+
+    def get_ui(self) -> Dict | None:
+        """
+        Declare UI actions for the app to render, or None.
+
+        Plugins hand over data, never code: the app only ever shows a link to one
+        of the plugin's own routes. See documentation/PLUGINS.md.
         """
         return None
 
@@ -313,15 +323,50 @@ class Plugin:
 
     def list_plugins(self) -> List[Dict]:
         """Get a list of all loaded plugins"""
-        return [
-            {
+        plugins = []
+        for plugin_id, plugin in self.plugins.items():
+            entry = {
                 "id": plugin_id,
                 "name": plugin.name,
                 "version": plugin.version,
                 "enabled": plugin.enabled
             }
-            for plugin_id, plugin in self.plugins.items()
-        ]
+            ui = self._plugin_ui(plugin_id, plugin) if plugin.enabled else None
+            if ui:
+                entry["ui"] = ui
+            plugins.append(entry)
+        return plugins
+
+    def _plugin_ui(self, plugin_id: str, plugin: Plugin) -> Dict | None:
+        """The plugin's valid UI actions, or None when it declares none."""
+        get_ui = getattr(plugin, "get_ui", None)
+        if not callable(get_ui):
+            return None
+        try:
+            declared = get_ui()
+            actions = declared.get("folder_actions", []) if declared else []
+            valid = [a for a in actions if self._valid_ui_action(plugin_id, a)]
+        except Exception as e:
+            logger.error("Plugin %s failed to provide UI actions: %s", plugin_id, e)
+            return None
+        return {"folder_actions": valid} if valid else None
+
+    def _valid_ui_action(self, plugin_id: str, action: Any) -> bool:
+        """An action may only link to its own plugin's routes, so a plugin cannot
+        turn an app button into a link to another site or to a core endpoint."""
+        url = action.get("url") if isinstance(action, dict) else None
+        prefix = f"/api/plugins/{plugin_id}/"
+        valid = (
+            isinstance(url, str)
+            and url.startswith(prefix)
+            and ".." not in url
+            and "\\" not in url
+            and isinstance(action.get("id"), str)
+            and isinstance(action.get("label"), (str, dict))
+        )
+        if not valid:
+            logger.warning("Plugin '%s' declared an invalid UI action, ignoring it: %r", plugin_id, action)
+        return valid
 
     def _load_config(self) -> Dict[str, bool]:
         """Load plugin configuration from JSON file"""

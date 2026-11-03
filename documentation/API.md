@@ -478,6 +478,9 @@ See [PLUGINS.md](PLUGINS.md) for full documentation on creating plugins.
 GET /api/plugins
 ```
 
+An enabled plugin that declares UI actions also returns a `ui` key. See
+[PLUGINS.md](PLUGINS.md#ui-actions).
+
 ### Toggle Plugin
 ```http
 POST /api/plugins/{plugin_name}/toggle

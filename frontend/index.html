@@ -2181,6 +2181,22 @@
                 </div>
             </template>
                                 </template>
+                                <template x-if="selectedHomepageFolder">
+                                    <div class="ml-auto flex items-center gap-2">
+                                        <template x-for="action in pluginFolderActions" :key="action.id">
+                                            <a
+                                                :href="pluginActionUrl(action, selectedHomepageFolder)"
+                                                class="flex items-center gap-1 hover:underline"
+                                                style="color: var(--accent-primary);"
+                                            >
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="pluginActionIcon(action)"></path>
+                                                </svg>
+                                                <span x-text="pluginActionLabel(action)"></span>
+                                            </a>
+                                        </template>
+                                    </div>
+                                </template>
                             </div>
                             
                             <!-- Stats Bar - Only show when there are notes or folders -->
@@ -2327,6 +2343,20 @@
                                             <!-- Folder Metadata -->
                                             <div class="flex items-center justify-between text-xs mt-auto pt-1 sm:pt-2" style="color: var(--text-tertiary);">
                                                 <span x-text="folder.noteCount + ' ' + (folder.noteCount === 1 ? t('homepage.note_singular') : t('homepage.note_plural'))"></span>
+                                                <template x-for="action in pluginFolderActions" :key="action.id">
+                                                    <a
+                                                        :href="pluginActionUrl(action, folder.path)"
+                                                        @click.stop
+                                                        class="ml-auto mr-1 p-1 rounded hover:brightness-110"
+                                                        style="color: var(--accent-primary); background-color: var(--bg-tertiary);"
+                                                        :title="pluginActionLabel(action)"
+                                                        :aria-label="pluginActionLabel(action)"
+                                                    >
+                                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="pluginActionIcon(action)"></path>
+                                                        </svg>
+                                                    </a>
+                                                </template>
                                                 <svg class="w-4 h-4 hidden sm:block" style="color: var(--accent-primary);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
                                                 </svg>
@@ -2384,6 +2414,20 @@
                                                 </svg>
                                             </span>
                                             <span class="font-medium text-sm truncate flex-1 min-w-0" x-text="folder.name"></span>
+                                            <template x-for="action in pluginFolderActions" :key="action.id">
+                                                <a
+                                                    :href="pluginActionUrl(action, folder.path)"
+                                                    @click.stop
+                                                    class="flex-shrink-0 p-1 rounded hover:brightness-110"
+                                                    style="color: var(--accent-primary);"
+                                                    :title="pluginActionLabel(action)"
+                                                    :aria-label="pluginActionLabel(action)"
+                                                >
+                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="pluginActionIcon(action)"></path>
+                                                    </svg>
+                                                </a>
+                                            </template>
                                             <span class="text-xs flex-shrink-0" style="color: var(--text-tertiary);" x-text="folder.noteCount + ' ' + (folder.noteCount === 1 ? t('homepage.note_singular') : t('homepage.note_plural'))"></span>
                                             <button
                                                 @click.stop="deleteFolder(folder.path, folder.name)"
