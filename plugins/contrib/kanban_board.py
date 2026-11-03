@@ -49,23 +49,35 @@ Card: any .md in the folder. Files starting with "_" or "." are not cards.
     # Fix SSO login
 
 A missing or unknown status puts the card in the first column, so no card is lost.
+
+Agents (MCP): on core versions with plugin MCP tools, this plugin adds
+kanban_board_list, kanban_board_get, kanban_board_update_card, kanban_board_create_card
+and kanban_board_configure. A typical flow:
+  1. kanban_board_get(folder, status="todo") to see the cards.
+  2. get_note(path) to read a card, then kanban_board_update_card(path, status="doing").
+  3. Work, then append_to_note(path, ...) with the result.
+  4. kanban_board_update_card(path, status="done").
+Pass expected_mtime from kanban_board_get to refuse a card that changed in between.
+Suggested convention: `owner: agent` marks the cards an agent can take without asking.
 The title is the first "# heading", or the file name when there is none.
 
 Clicking a card title opens a panel to edit its status, tags, fields and raw Markdown
 body. Everything else, like preview or wikilink autocomplete, stays in the full note.
 """
 
+import json
 import logging
 import os
 import re
+import unicodedata
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, HTTPException
 from fastapi.responses import HTMLResponse
 
-from backend.utils import parse_tags, resolve_vault_folder
+from backend.utils import note_name_conflict, parse_tags, resolve_vault_folder
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -264,6 +276,300 @@ def _card_sort_key(card: dict, config: dict) -> tuple:
     return (-weight, due, card["name"].casefold())
 
 
+# Frontmatter edits for the MCP tools. These mirror the kanbanSet* functions in the page
+# below, which do the same job for the browser: keep the two in step.
+PLAIN_YAML_VALUE = re.compile(r"^\w[\w .-]*$")
+VALID_TAG = re.compile(r"^\w[\w ./+-]*$")
+CONTINUATION = re.compile(r"^(?:[ \t]+\S|-[ \t])")
+FIELD_VALUE = r"""("(?:[^"\\]|\\.)*"|'[^']*'|.*?)"""
+RESERVED_FIELDS = {"status", "tags"}
+
+
+def _yaml_value(value: str) -> str:
+    return value if PLAIN_YAML_VALUE.match(value) else json.dumps(value, ensure_ascii=False)
+
+
+def _frontmatter_end(lines: list[str]) -> int:
+    if lines[0].startswith("﻿") or lines[0].strip() != "---":
+        return -1
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            return i
+    return -1
+
+
+def _set_field(content: str, key: str, new_value: str) -> str:
+    """Touch only this field. An empty value removes it, with any continuation lines."""
+    value = _yaml_value(new_value) if new_value else ""
+    lines = content.split("\n")
+    end = _frontmatter_end(lines)
+    if end < 0:
+        return f"---\n{key}: {value}\n---\n{content}" if value else content
+
+    pattern = re.compile(rf"^({re.escape(key)}[ \t]*:[ \t]*){FIELD_VALUE}([ \t]+#.*)?$")
+    edited = lines[:1]
+    found = False
+    i = 1
+    while i < end:
+        match = pattern.match(lines[i])
+        i += 1
+        if not match:
+            edited.append(lines[i - 1])
+            continue
+        found = True
+        while i < end and CONTINUATION.match(lines[i]):
+            i += 1
+        if value:
+            prefix = match[1] if match[1][-1].isspace() else match[1] + " "
+            edited.append(prefix + value + (match[3] or ""))
+    if not found and value:
+        edited.append(f"{key}: {value}")
+    return "\n".join(edited + lines[end:])
+
+
+def _set_tags(content: str, tags: list[str]) -> str:
+    """Write the tags unquoted, because parse_tags reads quotes as part of the tag."""
+    value = f"tags: [{', '.join(tags)}]" if tags else ""
+    lines = content.split("\n")
+    end = _frontmatter_end(lines)
+    if end < 0:
+        return f"---\n{value}\n---\n{content}" if value else content
+
+    start = next((i for i in range(1, end) if re.match(r"^tags[ \t]*:", lines[i])), None)
+    if start is None:
+        if value:
+            lines.insert(end, value)
+        return "\n".join(lines)
+
+    last = start
+    i = start + 1
+    while i < end and re.match(r"^(?:\s|-|#|$)", lines[i]):
+        if CONTINUATION.match(lines[i]) and not re.match(r"^\s*#", lines[i]):
+            last = i
+        i += 1
+    lines[start:last + 1] = [value] if value else []
+    return "\n".join(lines)
+
+
+def _split_note(content: str) -> tuple[str, str]:
+    """Return (head with frontmatter, body), so head + body gives back the same text."""
+    lines = content.split("\n")
+    end = _frontmatter_end(lines)
+    if end < 0:
+        return "", content
+    length = len("\n".join(lines[:end + 1]))
+    if content[length:length + 1] == "\n":
+        length += 1
+    return content[:length], content[length:]
+
+
+def _with_body(content: str, body: str) -> str:
+    head, _ = _split_note(content)
+    separator = "\n" if head and not head.endswith("\n") and body else ""
+    return head + separator + body
+
+
+def _board_block_range(lines: list[str], end: int) -> tuple[int, int] | None:
+    start = next((i for i in range(1, end) if re.match(r"^board[ \t]*:", lines[i])), None)
+    if start is None:
+        return None
+    last = start
+    i = start + 1
+    while i < end and re.match(r"^(?:\s|#|$)", lines[i]):
+        if re.match(r"^\s+\S", lines[i]):
+            last = i
+        i += 1
+    return start, last
+
+
+def _board_has_comments(content: str) -> bool:
+    lines = content.split("\n")
+    end = _frontmatter_end(lines)
+    block = _board_block_range(lines, end) if end >= 0 else None
+    if block is None:
+        return False
+    unquoted = (re.sub(r""""(?:[^"\\]|\\.)*"|'[^']*'""", "", line) for line in lines[block[0]:block[1] + 1])
+    return any(re.search(r"(^|\s)#", line) for line in unquoted)
+
+
+def _set_board_block(content: str, block: str) -> str:
+    lines = content.split("\n")
+    end = _frontmatter_end(lines)
+    if end < 0:
+        return f"---\n{block}\n---\n{content}"
+    found = _board_block_range(lines, end)
+    if found:
+        lines[found[0]:found[1] + 1] = [block]
+    else:
+        lines.insert(end, block)
+    return "\n".join(lines)
+
+
+def _board_block(columns: list[dict], fields: list[dict]) -> str:
+    def as_list(values):
+        return "[" + ", ".join(_yaml_value(v) for v in values) + "]"
+
+    lines = ["board:", "  columns: " + as_list([c["id"] for c in columns])]
+    labelled = [c for c in columns if c.get("label")]
+    if labelled:
+        lines.append("  labels:")
+        lines += [f"    {_yaml_value(c['id'])}: {_yaml_value(c['label'])}" for c in labelled]
+    lines.append("  done: " + as_list([c["id"] for c in columns if c.get("done")]))
+    if fields:
+        lines.append("  fields:")
+        for field in fields:
+            spec = as_list(field["values"]) if field["type"] == "list" else field["type"]
+            lines.append(f"    {_yaml_value(field['id'])}: {spec}")
+    else:
+        lines.append("  fields: {}")
+    return "\n".join(lines)
+
+
+def _slug(name: str) -> str:
+    plain = "".join(c for c in unicodedata.normalize("NFD", name) if not unicodedata.combining(c))
+    return re.sub(r"[^a-z0-9]+", "-", plain.lower()).strip("-")
+
+
+def _fail(status_code: int, detail: str):
+    raise HTTPException(status_code=status_code, detail=detail)
+
+
+def _clean_text(value, name: str) -> str:
+    if not isinstance(value, str) or "\n" in value or "\r" in value:
+        _fail(400, f"{name} must be text on one line")
+    return value.strip()
+
+
+def _clean_status(status, config: dict) -> str:
+    ids = [column["id"] for column in config["columns"]]
+    if status not in ids:
+        _fail(400, f"Unknown status {status!r}. This board has: {', '.join(ids)}")
+    return status
+
+
+def _clean_tags(tags) -> list[str]:
+    if not isinstance(tags, list):
+        _fail(400, "tags must be a list")
+    cleaned = []
+    for tag in tags:
+        tag = _clean_text(tag, "tag").lstrip("#").strip().lower()
+        if not VALID_TAG.match(tag):
+            _fail(400, f"Invalid tag {tag!r}. Use letters, numbers, spaces and _ - . / +")
+        if tag not in cleaned:
+            cleaned.append(tag)
+    return cleaned
+
+
+def _clean_fields(fields, config: dict) -> dict[str, str]:
+    if not isinstance(fields, dict):
+        _fail(400, "fields must be an object")
+    known = {field["id"]: field for field in config["fields"]}
+    cleaned = {}
+    for field_id, value in fields.items():
+        field = known.get(field_id)
+        if field is None:
+            _fail(400, f"Unknown field {field_id!r}. This board has: {', '.join(known) or 'no fields'}")
+        value = "" if value is None else _clean_text(value, field_id)
+        if value and field["type"] == "list" and value not in field["values"]:
+            _fail(400, f"{field_id} must be one of: {', '.join(field['values'])}")
+        if value and field["type"] == "date":
+            try:
+                datetime.strptime(value, "%Y-%m-%d")
+            except ValueError:
+                _fail(400, f"{field_id} must be a date as YYYY-MM-DD")
+        cleaned[field_id] = value
+    return cleaned
+
+
+MCP_TOOLS = [
+    {
+        "name": "kanban_board_list",
+        "description": "List the Kanban boards in the vault: the folders that have a _board.md, with their columns. A folder without _board.md can still be used as a board with the default columns.",
+        "inputSchema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "kanban_board_get",
+        "description": "Read a folder as a Kanban board: its columns, fields and cards. Each card has path, title, status, column, tags, fields, mtime and warnings. Cards do not include the note text, so use get_note to read it.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "folder": {"type": "string", "description": "Folder path. An empty string is the vault root."},
+                "status": {"type": "string", "description": "Only return the cards shown in this column."},
+            },
+            "required": ["folder"],
+        },
+    },
+    {
+        "name": "kanban_board_update_card",
+        "description": "Change a card. Send only what should change. Use status to move the card to another column. Only the affected frontmatter lines change, and everything else in the note stays. To add to the note text without replacing it, use append_to_note.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Card path, as kanban_board_get returns it."},
+                "status": {"type": "string", "description": "New column id."},
+                "tags": {"type": "array", "items": {"type": "string"}, "description": "The full new list of tags."},
+                "fields": {"type": "object", "description": "Fields to change, by id. Use null or an empty string to remove a field. Only fields of the board are accepted."},
+                "body": {"type": "string", "description": "New note text, replacing everything after the frontmatter."},
+                "expected_mtime": {"type": "string", "description": "The card mtime you read. If the card changed since then, nothing is written and the call fails."},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "kanban_board_create_card",
+        "description": "Create a card in a board folder. The file name comes from the title and never replaces an existing note.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "folder": {"type": "string", "description": "Board folder path."},
+                "title": {"type": "string", "description": "Card title, written as the first heading."},
+                "status": {"type": "string", "description": "Column id. Default: the first column."},
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "fields": {"type": "object", "description": "Field values, by id. Only fields of the board are accepted."},
+                "body": {"type": "string", "description": "Note text after the heading."},
+            },
+            "required": ["folder", "title"],
+        },
+    },
+    {
+        "name": "kanban_board_configure",
+        "description": "Change a board's columns and fields in its _board.md, creating the file if needed. Send the full new list of what you change; a list you omit stays as it is. Order matters: cards with no status go to the first column, the first list field is the priority, and the first list and date fields sort the cards. Existing column ids and field ids cannot be renamed, because notes use them. A column with cards cannot be removed. This rewrites the board block, which removes comments inside it.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "folder": {"type": "string", "description": "Board folder path."},
+                "columns": {
+                    "type": "array",
+                    "description": "Columns in order. To keep a column, send its id. For a new column, send a label and the id comes from it.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "label": {"type": "string", "description": "Display name. An empty string removes it."},
+                            "done": {"type": "boolean", "description": "Cards here show as finished."},
+                        },
+                    },
+                },
+                "fields": {
+                    "type": "array",
+                    "description": "Fields in order.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "type": {"type": "string", "enum": ["date", "text", "list"]},
+                            "values": {"type": "array", "items": {"type": "string"}, "description": "Allowed values for a list, lowest first."},
+                        },
+                        "required": ["id", "type"],
+                    },
+                },
+            },
+            "required": ["folder"],
+        },
+    },
+]
+
+
 class Plugin:
     def __init__(self):
         self.name = "Kanban Board"
@@ -277,6 +583,12 @@ class Plugin:
         global logger
         logger = ctx.logger
         self.notes_dir = ctx.notes_dir
+        # Absent on core versions without plugin MCP tools. The tools stay off there.
+        self.read_note = getattr(ctx, "read_note", None)
+        self.write_note = getattr(ctx, "write_note", None)
+
+    def get_mcp_tools(self) -> list[dict]:
+        return MCP_TOOLS if self.write_note else []
 
     def get_ui(self) -> dict:
         """Folder action for core versions with plugin UI actions. Older versions
@@ -316,6 +628,19 @@ class Plugin:
         def data(folder: str = ""):
             return self._board_data(self._resolve_folder(folder))
 
+        @router.post("/mcp/{tool}")
+        def mcp_tool(tool: str, args: dict = Body(default={})):
+            handlers = {
+                "kanban_board_list": self._tool_list,
+                "kanban_board_get": self._tool_get,
+                "kanban_board_update_card": self._tool_update_card,
+                "kanban_board_create_card": self._tool_create_card,
+                "kanban_board_configure": self._tool_configure,
+            }
+            if not self.enabled or not self.write_note or tool not in handlers:
+                _fail(404, "Tool not available")
+            return handlers[tool](args)
+
         return router
 
     def _resolve_folder(self, folder: str) -> Path:
@@ -328,6 +653,222 @@ class Plugin:
         if target is None:
             raise HTTPException(status_code=404, detail="Folder not found")
         return target
+
+    def _relative(self, path: Path) -> str:
+        return path.resolve().relative_to(Path(self.notes_dir).resolve()).as_posix()
+
+    def _tool_folder(self, args: dict) -> Path:
+        folder = args.get("folder")
+        if not isinstance(folder, str):
+            _fail(400, "folder is required")
+        return self._resolve_folder(folder)
+
+    def _tool_list(self, args: dict) -> dict:
+        boards = []
+        for root, dirnames, filenames in os.walk(self.notes_dir):
+            dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+            if BOARD_FILE in filenames:
+                folder = Path(root)
+                config = _read_board_config(folder)
+                rel_folder = self._relative(folder)
+                boards.append({
+                    "folder": "" if rel_folder == "." else rel_folder,
+                    "valid": config["board_file_valid"],
+                    "columns": [column["id"] for column in config["columns"]],
+                })
+        return {"boards": boards}
+
+    def _tool_get(self, args: dict) -> dict:
+        data = self._board_data(self._tool_folder(args))
+        data.pop("board_template", None)
+        status = args.get("status")
+        if status is not None:
+            _clean_status(status, data)
+            data["cards"] = [card for card in data["cards"] if card["column"] == status]
+        return data
+
+    def _card_target(self, rel_path) -> tuple[Path, Path, str]:
+        """Return (note file, its folder, its path in the vault) for a card."""
+        if not isinstance(rel_path, str) or not rel_path.endswith(".md"):
+            _fail(400, "path must be a .md note")
+        pure = PurePosixPath(rel_path)
+        if pure.name[0] in "_.":
+            _fail(400, f"{pure.name} is not a card")
+        parent = "" if str(pure.parent) == "." else str(pure.parent)
+        folder = self._resolve_folder(parent)
+        target = folder / pure.name
+        if target.is_symlink() or not target.is_file():
+            _fail(404, "Card not found")
+        return target, folder, self._relative(target)
+
+    def _save(self, rel_path: str, content: str):
+        if not self.write_note(rel_path, content):
+            _fail(500, "Failed to save the note")
+
+    def _tool_update_card(self, args: dict) -> dict:
+        target, folder, rel_path = self._card_target(args.get("path"))
+        config = _read_board_config(folder)
+        card = _read_card(target, rel_path, config)
+        if args.get("expected_mtime") and args["expected_mtime"] != card["mtime"]:
+            _fail(409, "The card changed since you read it. Nothing was written. Read it again.")
+        if "invalid_frontmatter" in card["warnings"]:
+            _fail(409, "This card has invalid frontmatter. Fix it with edit_note first.")
+
+        # Validate everything first, so a bad value never leaves half a change.
+        status = _clean_status(args["status"], config) if "status" in args else None
+        fields = _clean_fields(args["fields"], config) if "fields" in args else {}
+        tags = _clean_tags(args["tags"]) if "tags" in args else None
+        if "body" in args and not isinstance(args["body"], str):
+            _fail(400, "body must be text")
+
+        content = self.read_note(rel_path)
+        if content is None:
+            _fail(404, "Card not found")
+        updated = _with_body(content, args["body"]) if "body" in args else content
+        if status is not None and status != card["status"]:
+            updated = _set_field(updated, "status", status)
+        for field_id, value in fields.items():
+            if value != card["fields"].get(field_id, ""):
+                updated = _set_field(updated, field_id, value)
+        if tags is not None and sorted(tags) != sorted(card["tags"]):
+            updated = _set_tags(updated, tags)
+
+        if updated != content:
+            self._save(rel_path, updated)
+        return _read_card(target, rel_path, config)
+
+    def _free_note_name(self, folder: Path, title: str) -> str:
+        """A file name for this title that no note uses yet."""
+        clean = re.sub(r'[\\/:*?"<>|#\x00-\x1f]', " ", title)
+        clean = re.sub(r"\s+", " ", clean).strip().lstrip("_. ")
+        base = clean[:80].strip() or "card"
+        notes_dir = str(self.notes_dir)
+        for i in range(1, 100):
+            name = f"{base}.md" if i == 1 else f"{base} {i}.md"
+            rel_path = self._relative(folder / name)
+            if not (folder / name).exists() and not note_name_conflict(notes_dir, rel_path):
+                return name
+        _fail(409, "No free note name for this title")
+
+    def _tool_create_card(self, args: dict) -> dict:
+        folder = self._tool_folder(args)
+        config = _read_board_config(folder)
+        title = _clean_text(args.get("title"), "title")
+        if not title:
+            _fail(400, "title is required")
+        status = _clean_status(args["status"], config) if "status" in args else config["columns"][0]["id"]
+        fields = _clean_fields(args.get("fields") or {}, config)
+        tags = _clean_tags(args.get("tags") or [])
+        body = args.get("body") or ""
+        if not isinstance(body, str):
+            _fail(400, "body must be text")
+
+        content = f"---\nstatus: {_yaml_value(status)}\n---\n# {title}\n"
+        if body:
+            content += f"\n{body.rstrip()}\n"
+        for field_id, value in fields.items():
+            content = _set_field(content, field_id, value)
+        if tags:
+            content = _set_tags(content, tags)
+
+        target = folder / self._free_note_name(folder, title)
+        rel_path = self._relative(target)
+        self._save(rel_path, content)
+        return _read_card(target, rel_path, _read_board_config(folder))
+
+    def _configured_columns(self, requested, current: dict, cards: list[dict]) -> list[dict]:
+        if not isinstance(requested, list) or not requested:
+            _fail(400, "columns must be a list with at least one column")
+        existing = {column["id"]: column for column in current["columns"]}
+        used = set(existing)
+        columns = []
+        for item in requested:
+            if not isinstance(item, dict):
+                _fail(400, "Each column must be an object")
+            label = _clean_text(item["label"], "label") if "label" in item else None
+            column_id = _clean_text(item["id"], "id") if item.get("id") else None
+            if column_id is None:
+                if not label:
+                    _fail(400, "A new column needs an id or a label")
+                base = _slug(label) or "column"
+                column_id = base
+                n = 2
+                while column_id in used:
+                    column_id = f"{base}-{n}"
+                    n += 1
+                used.add(column_id)
+            if column_id in [column["id"] for column in columns]:
+                _fail(400, f"Column {column_id!r} appears twice")
+            old = existing.get(column_id, {})
+            columns.append({
+                "id": column_id,
+                "label": old.get("label") if label is None else label,
+                "done": bool(item.get("done", old.get("done", False))),
+            })
+
+        kept = {column["id"] for column in columns}
+        for column_id in existing.keys() - kept:
+            count = sum(1 for card in cards if card["status"] == column_id)
+            if count:
+                _fail(409, f"Column {column_id!r} has {count} card(s). Move them first.")
+        return columns
+
+    def _configured_fields(self, requested, current: dict) -> list[dict]:
+        if not isinstance(requested, list):
+            _fail(400, "fields must be a list")
+        existing = {field["id"] for field in current["fields"]}
+        fields = []
+        for item in requested:
+            if not isinstance(item, dict):
+                _fail(400, "Each field must be an object")
+            raw_id = _clean_text(item.get("id"), "id")
+            field_id = raw_id if raw_id in existing else _slug(raw_id)
+            if not field_id:
+                _fail(400, f"Invalid field id {raw_id!r}")
+            if field_id in RESERVED_FIELDS:
+                _fail(400, f"A field cannot be named {field_id}")
+            if field_id in [field["id"] for field in fields]:
+                _fail(400, f"Field {field_id!r} appears twice")
+            field_type = item.get("type")
+            if field_type not in ("date", "text", "list"):
+                _fail(400, f"Field {field_id!r} needs a type: date, text or list")
+            values = []
+            if field_type == "list":
+                for value in item.get("values") or []:
+                    value = _clean_text(value, "value")
+                    if value and value not in values:
+                        values.append(value)
+                if not values:
+                    _fail(400, f"The list {field_id!r} needs at least one value")
+            fields.append({"id": field_id, "type": field_type, "values": values})
+        return fields
+
+    def _tool_configure(self, args: dict) -> dict:
+        folder = self._tool_folder(args)
+        current = _read_board_config(folder)
+        if not current["board_file_valid"]:
+            _fail(409, "_board.md has invalid YAML. Fix it with edit_note first.")
+        if "columns" not in args and "fields" not in args and current["has_board_file"]:
+            _fail(400, "Send columns, fields or both")
+
+        cards = self._board_data(folder)["cards"]
+        columns = (self._configured_columns(args["columns"], current, cards)
+                   if "columns" in args else current["columns"])
+        fields = (self._configured_fields(args["fields"], current)
+                  if "fields" in args else current["fields"])
+        fields = [{"values": [], **field} for field in fields]
+
+        rel_path = self._relative(folder / BOARD_FILE)
+        content = (self.read_note(rel_path) or "") if current["has_board_file"] else ""
+        comments_removed = _board_has_comments(content)
+        self._save(rel_path, _set_board_block(content, _board_block(columns, fields)))
+
+        config = _read_board_config(folder)
+        return {
+            "columns": config["columns"],
+            "fields": config["fields"],
+            "comments_removed": comments_removed,
+        }
 
     def _board_data(self, folder: Path) -> dict:
         config = _read_board_config(folder)
