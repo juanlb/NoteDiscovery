@@ -44,6 +44,7 @@ Card: any .md in the folder. Files starting with "_" or "." are not cards.
 
 A missing or unknown status puts the card in the first column, so no card is lost.
 The title is the first "# heading", or the file name when there is none.
+
 """
 
 import logging
@@ -84,7 +85,7 @@ Board settings for this folder. The kanban_board plugin ignores this text.
 """
 
 ISO_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-HEADING_PATTERN = re.compile(r"^#[ \t]+(.+?)[ \t]*#*[ \t]*$")
+HEADING_PATTERN = re.compile(r"^#[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$")
 FENCE_PATTERN = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
 
@@ -119,7 +120,8 @@ def _parse_yaml(frontmatter: str | None) -> tuple[dict, bool]:
         return {}, True
     try:
         data = yaml.load(frontmatter, Loader=yaml.BaseLoader)
-    except yaml.YAMLError:
+    # RecursionError: deeply nested input, which one note must not turn into a 500.
+    except (yaml.YAMLError, RecursionError):
         return {}, False
     if data is None or data == "":
         return {}, True
@@ -178,7 +180,8 @@ def _read_board_config(folder: Path) -> dict:
 
     columns = _string_list(raw.get("columns")) or DEFAULT_COLUMNS
     labels = raw.get("labels") if isinstance(raw.get("labels"), dict) else {}
-    done = _string_list(raw.get("done")) or DEFAULT_DONE
+    # An empty list is a valid choice: a board with no finished columns.
+    done = _string_list(raw["done"]) if isinstance(raw.get("done"), list) else DEFAULT_DONE
     raw_fields = raw.get("fields") if isinstance(raw.get("fields"), dict) else DEFAULT_FIELDS
 
     return {
@@ -204,7 +207,10 @@ def _read_card(path: Path, rel_path: str, config: dict) -> dict:
     text = _read_head(path)
     frontmatter, body = _split_frontmatter(text)
     values, valid = _parse_yaml(frontmatter)
-    warnings = [] if valid else ["invalid_frontmatter"]
+    # Frontmatter past the read limit looks absent, and a move would then add a second
+    # block in front of the real one.
+    truncated = frontmatter is None and len(text) >= MAX_READ_CHARS and text.split("\n")[0].strip() == "---"
+    warnings = [] if valid and not truncated else ["invalid_frontmatter"]
 
     column_ids = [column["id"] for column in config["columns"]]
     status = values.get("status")
@@ -360,6 +366,8 @@ function kanbanApplyTheme() {
       document.head.appendChild(style);
     }
     style.textContent = theme.css;
+    // Native controls, like the date picker icon, follow the theme this way.
+    document.documentElement.style.colorScheme = /@theme-type:\s*light/.test(theme.css) ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', id);
   } catch (e) {
     console.error('Failed to load theme:', e);
@@ -405,7 +413,7 @@ svg { flex-shrink: 0; }
 .column-add { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--text-tertiary); }
 .column-add:hover { background: var(--bg-hover); color: var(--text-primary); }
 dialog { width: min(420px, calc(100vw - 32px)); padding: 16px; border: 1px solid var(--border-primary); border-radius: 8px; background: var(--bg-primary); color: var(--text-primary); box-shadow: var(--shadow-md); }
-dialog::backdrop { background: rgba(0, 0, 0, .4); }
+dialog::backdrop { background: color-mix(in srgb, var(--bg-primary) 60%, transparent); }
 dialog h2 { margin: 0 0 12px; font-size: 16px; }
 .form-row { display: block; margin-bottom: 12px; font-size: 12px; color: var(--text-secondary); }
 .form-row input, .form-row select { display: block; width: 100%; height: 38px; margin-top: 4px; padding: 0 8px; border: 1px solid var(--border-primary); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary); font: inherit; font-size: 14px; }
@@ -540,29 +548,45 @@ function kanbanYamlValue(status) {
   return /^[\p{L}\p{N}_][\p{L}\p{N}_ .-]*$/u.test(status) ? status : JSON.stringify(status);
 }
 
-// Touches only the status line, never the rest of the frontmatter, so comments, order
-// and formatting survive. A trailing comment on that line is kept too.
-function kanbanSetStatus(content, status) {
-  const value = kanbanYamlValue(status);
+function kanbanFrontmatterEnd(lines) {
+  // A BOM hides the frontmatter from core and from the Python side of this plugin.
+  if (lines[0].startsWith('﻿') || lines[0].trim() !== '---') return -1;
+  return lines.findIndex((line, index) => index > 0 && line.trim() === '---');
+}
+
+// Lines that belong to the value of the key above them.
+const KANBAN_CONTINUATION = /^(?:[ \t]+\S|-[ \t])/;
+
+// Touches only this field, never the rest of the frontmatter, so comments, order and
+// formatting survive. A trailing comment on its line is kept too. An empty value removes
+// the field, including a value that spans several lines.
+function kanbanSetField(content, key, newValue) {
+  const value = newValue ? kanbanYamlValue(newValue) : '';
   const lines = content.split('\n');
-  const end = lines[0].trim() === '---'
-    ? lines.findIndex((line, index) => index > 0 && line.trim() === '---')
-    : -1;
+  const end = kanbanFrontmatterEnd(lines);
 
-  if (end < 0) return '---\nstatus: ' + value + '\n---\n' + content;
+  if (end < 0) return value ? '---\n' + key + ': ' + value + '\n---\n' + content : content;
 
+  const name = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp('^(' + name + '[ \\t]*:[ \\t]*)("(?:[^"\\\\]|\\\\.)*"|\'[^\']*\'|.*?)([ \\t]+#.*)?$');
+  const edited = lines.slice(0, 1);
   let found = false;
   for (let i = 1; i < end; i++) {
-    const match = /^(status[ \t]*:[ \t]*)(.*?)([ \t]+#.*)?$/.exec(lines[i]);
-    if (match) {
+    const match = pattern.exec(lines[i]);
+    if (!match) {
+      edited.push(lines[i]);
+      continue;
+    }
+    found = true;
+    while (i + 1 < end && KANBAN_CONTINUATION.test(lines[i + 1])) i++;
+    if (value) {
       // `status:` with no value has no space after the colon yet.
       const prefix = /\s$/.test(match[1]) ? match[1] : match[1] + ' ';
-      lines[i] = prefix + value + (match[3] || '');
-      found = true;
+      edited.push(prefix + value + (match[3] || ''));
     }
   }
-  if (!found) lines.splice(end, 0, 'status: ' + value);
-  return lines.join('\n');
+  if (!found && value) edited.push(key + ': ' + value);
+  return edited.concat(lines.slice(end)).join('\n');
 }
 
 function kanbanBoard() {
@@ -789,7 +813,7 @@ function kanbanBoard() {
         const saved = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: kanbanSetStatus(note.content, status), base_hash: note.hash }),
+          body: JSON.stringify({ content: kanbanSetField(note.content, 'status', status), base_hash: note.hash }),
         });
         if (saved.status === 401) {
           location.href = '/login';
@@ -844,7 +868,9 @@ function kanbanBoard() {
       const response = await fetch(this.noteApiUrl(path), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
+        // Core ignores base_hash for a new note and answers 409 if the note now exists,
+        // which keeps two tabs creating the same name from overwriting each other.
+        body: JSON.stringify({ content, base_hash: 'new' }),
       });
       if (response.status === 401) location.href = '/login';
       else if (!response.ok) throw new Error('HTTP ' + response.status);
