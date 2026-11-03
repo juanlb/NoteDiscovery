@@ -11,6 +11,10 @@ Caveats: Only reads the notes directly inside the folder, never subfolders.
          LF line endings, so a move also converts a CRLF note to LF, as any save does.
          Changing tags in the panel writes them as `tags: [a, b]`, which replaces a
          multi-line list and any comments inside it.
+         Saving from the gear button rewrites the `board:` block of _board.md, which
+         drops comments inside it and fields with an unknown type. Other keys and the
+         free text stay. Column ids and field names are fixed once created, because
+         notes and agents use them; rename a column through its display name.
          Reads frontmatter straight from disk, because plugins have no access to
          on_note_load. Not compatible with plugins that transform note content on
          disk (for example, encryption): those cards land in the first column.
@@ -31,7 +35,7 @@ Board schema (optional): <folder>/_board.md
     ---
 
 Without this file the board uses exactly the columns, done list and fields above,
-and the page offers a button to create it.
+and the page offers a button to create it. The gear button edits this schema visually.
 
 Card: any .md in the folder. Files starting with "_" or "." are not cards.
 
@@ -429,6 +433,17 @@ dialog.editor h2 { flex: 1; min-width: 0; margin: 4px 0 0; overflow-wrap: anywhe
 .editor-body { flex: 1 0 240px; width: 100%; padding: 10px; border: 1px solid var(--border-primary); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary); font: 13px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; resize: none; }
 .editor-message { flex-shrink: 0; margin: 10px 0 0; color: var(--kanban-error); font-size: 12px; }
 .editor-form .form-actions { flex-shrink: 0; margin-top: 12px; }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.settings-section { flex-shrink: 0; margin-bottom: 16px; }
+.settings-section h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.settings-hint { margin: 2px 0 8px; font-size: 12px; color: var(--text-secondary); }
+.settings-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 0; border-top: 1px solid var(--border-primary); }
+.settings-input { flex: 1 1 130px; min-width: 0; height: 34px; padding: 0 8px; border: 1px solid var(--border-primary); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary); font: inherit; }
+.settings-id { flex: 1 1 110px; min-width: 0; font: 11px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--text-secondary); overflow-wrap: anywhere; }
+.settings-check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary); cursor: pointer; }
+.settings-select { flex: 0 0 auto; }
+.settings-actions { display: inline-flex; gap: 4px; margin-left: auto; }
+.settings-add { margin-top: 4px; }
 
 .filters { display: flex; align-items: center; gap: 10px; padding: 10px 20px; }
 .chips { display: flex; flex: 1; min-width: 0; flex-wrap: wrap; gap: 6px; }
@@ -497,6 +512,8 @@ dialog.editor h2 { flex: 1; min-width: 0; margin: 4px 0 0; overflow-wrap: anywhe
   .editor-fields { grid-template-columns: 1fr; }
   .editor-body { font-size: 16px; }
   .editor-link { height: 44px; }
+  .settings-input { height: 44px; font-size: 16px; }
+  .settings-check { min-height: 44px; }
   .filters { padding: 10px 16px; }
   .chips { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
   .chip-btn { height: 44px; padding: 0 12px; }
@@ -526,6 +543,16 @@ const KANBAN_TEXT = {
     no_notes: 'No notes in this folder', no_cards: 'No cards', no_matches: 'No cards match the filter',
     load_error: 'Could not load the board', move_to: 'Move to…', move_to_column: 'Move to {column}',
     conflict: 'The card changed, reloading', move_error: 'Could not move the card',
+    settings: 'Board settings', columns_title: 'Columns', fields_title: 'Fields', add_column: 'Add column', add_field: 'Add field',
+    column_name: 'Column name', field_name: 'Field name', finished: 'Finished', move_up: 'Move up', move_down: 'Move down', remove: 'Remove',
+    type_date: 'Date', type_text: 'Text', type_list: 'List', field_type: 'Field type', list_values: 'Values, lowest first (comma separated)',
+    hint_columns: 'Cards with no status, or an unknown one, go to the first column.',
+    hint_fields: 'The first list is the card priority. The first list and the first date sort the cards.',
+    comments_warning: 'Saving removes the comments inside the board block of _board.md.',
+    board_invalid_edit: 'The _board.md file has invalid YAML. Fix it as text first.', open_board_file: 'Open _board.md',
+    field_reserved: 'A field cannot be named {name}.', field_duplicate: 'There are two fields named {name}.',
+    field_needs_values: 'The list {name} needs at least one value.', needs_column: 'The board needs at least one column.',
+    settings_conflict: '_board.md changed while you were editing. Nothing was saved, and your changes are still here.',
     open_full: 'Open full note', close: 'Close', save: 'Save', status: 'Status', tags: 'Tags (comma separated)', body: 'Note text',
     unsaved: 'Discard the unsaved changes?', save_error: 'Could not save the note', open_error: 'Could not open the note',
     edit_conflict: 'The note changed while you were editing. Nothing was saved, and your text is still here so you can copy it.',
@@ -543,6 +570,16 @@ const KANBAN_TEXT = {
     no_notes: 'No hay notas en esta carpeta', no_cards: 'Sin cards', no_matches: 'Ninguna card coincide con el filtro',
     load_error: 'No se pudo cargar el tablero', move_to: 'Mover a…', move_to_column: 'Mover a {column}',
     conflict: 'La card cambió, recargando', move_error: 'No se pudo mover la card',
+    settings: 'Configuración del tablero', columns_title: 'Columnas', fields_title: 'Campos', add_column: 'Agregar columna', add_field: 'Agregar campo',
+    column_name: 'Nombre de la columna', field_name: 'Nombre del campo', finished: 'Terminada', move_up: 'Subir', move_down: 'Bajar', remove: 'Quitar',
+    type_date: 'Fecha', type_text: 'Texto', type_list: 'Lista', field_type: 'Tipo de campo', list_values: 'Valores, de menor a mayor (separados por coma)',
+    hint_columns: 'Las cards sin status, o con uno desconocido, van a la primera columna.',
+    hint_fields: 'La primera lista es la prioridad de la card. La primera lista y la primera fecha ordenan las cards.',
+    comments_warning: 'Al guardar se pierden los comentarios del bloque board de _board.md.',
+    board_invalid_edit: 'El archivo _board.md tiene YAML inválido. Primero arreglalo como texto.', open_board_file: 'Abrir _board.md',
+    field_reserved: 'Un campo no puede llamarse {name}.', field_duplicate: 'Hay dos campos llamados {name}.',
+    field_needs_values: 'La lista {name} necesita al menos un valor.', needs_column: 'El tablero necesita al menos una columna.',
+    settings_conflict: '_board.md cambió mientras editabas. No se guardó nada, y tus cambios siguen acá.',
     open_full: 'Abrir nota completa', close: 'Cerrar', save: 'Guardar', status: 'Status', tags: 'Tags (separados por coma)', body: 'Texto de la nota',
     unsaved: '¿Descartar los cambios sin guardar?', save_error: 'No se pudo guardar la nota', open_error: 'No se pudo abrir la nota',
     edit_conflict: 'La nota cambió mientras editabas. No se guardó nada, y tu texto sigue acá para que lo copies.',
@@ -646,6 +683,68 @@ function kanbanSplitNote(content) {
   return { head: content.slice(0, length), body: content.slice(length) };
 }
 
+function kanbanSlug(name) {
+  return name.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+function kanbanSplitList(text) {
+  return [...new Set(text.split(',').map(value => value.trim()).filter(Boolean))];
+}
+
+// The board block runs to its last indented line, so a comment before the next key stays.
+function kanbanBoardBlockRange(lines, end) {
+  const start = lines.findIndex((line, index) => index > 0 && index < end && /^board[ \t]*:/.test(line));
+  if (start < 0) return null;
+  let last = start;
+  for (let i = start + 1; i < end && /^(\s|#|$)/.test(lines[i]); i++) {
+    if (/^\s+\S/.test(lines[i])) last = i;
+  }
+  return { start, last };
+}
+
+function kanbanBoardHasComments(content) {
+  const lines = content.split('\n');
+  const end = kanbanFrontmatterEnd(lines);
+  const range = end < 0 ? null : kanbanBoardBlockRange(lines, end);
+  // A # inside a quoted value, like "Review: #1", is not a comment.
+  const withoutQuotes = line => line.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '');
+  return !!range && lines.slice(range.start, range.last + 1).some(line => /(^|\s)#/.test(withoutQuotes(line)));
+}
+
+function kanbanSetBoardBlock(content, block) {
+  const lines = content.split('\n');
+  const end = kanbanFrontmatterEnd(lines);
+  if (end < 0) return '---\n' + block + '\n---\n' + content;
+  const range = kanbanBoardBlockRange(lines, end);
+  if (range) lines.splice(range.start, range.last - range.start + 1, block);
+  else lines.splice(end, 0, block);
+  return lines.join('\n');
+}
+
+function kanbanBoardBlock(columns, fields) {
+  const list = values => '[' + values.map(kanbanYamlValue).join(', ') + ']';
+  const lines = ['board:', '  columns: ' + list(columns.map(column => column.id))];
+  const labelled = columns.filter(column => column.label);
+  if (labelled.length) {
+    lines.push('  labels:');
+    for (const column of labelled) {
+      lines.push('    ' + kanbanYamlValue(column.id) + ': ' + kanbanYamlValue(column.label));
+    }
+  }
+  lines.push('  done: ' + list(columns.filter(column => column.done).map(column => column.id)));
+  if (fields.length) {
+    lines.push('  fields:');
+    for (const field of fields) {
+      const spec = field.type === 'list' ? list(field.values) : field.type;
+      lines.push('    ' + kanbanYamlValue(field.id) + ': ' + spec);
+    }
+  } else {
+    lines.push('  fields: {}');
+  }
+  return lines.join('\n');
+}
+
 function kanbanBoard() {
   const locale = kanbanLocale();
   const text = locale.toLowerCase().startsWith('es') ? KANBAN_TEXT.es : KANBAN_TEXT.en;
@@ -665,6 +764,8 @@ function kanbanBoard() {
     notice: '',
     newTitle: '',
     newColumn: null,
+    rowCount: 0,
+    settings: { loading: false, saving: false, invalid: false, conflict: false, error: '', hasFile: false, hasComments: false, columns: [], fields: [], content: '', hash: null, original: '' },
     edit: { title: '', url: '', raw: false, loading: false, saving: false, conflict: false, error: '', status: '', tagsText: '', fields: {}, body: '', original: { fields: {} } },
 
     init() {
@@ -1124,6 +1225,200 @@ function kanbanBoard() {
       }
     },
 
+    async openSettings() {
+      this.settings = { ...this.settings, loading: true, invalid: false, conflict: false, error: '' };
+      this.$refs.settings.showModal();
+      this.$refs.settings.focus();
+      await this.fillSettings();
+    },
+
+    async fillSettings() {
+      try {
+        await this.load();
+        const board = this.board;
+        const note = board.has_board_file && board.board_file_valid
+          ? await this.fetchNote(this.notePath('_board.md'))
+          : null;
+        const content = note ? note.content : '';
+
+        this.settings = {
+          ...this.settings,
+          loading: false,
+          conflict: false,
+          error: '',
+          invalid: !board.board_file_valid,
+          hasFile: board.has_board_file,
+          hasComments: kanbanBoardHasComments(content),
+          content,
+          hash: note ? note.hash : null,
+          columns: board.columns.map(column => ({
+            uid: ++this.rowCount,
+            id: column.id,
+            label: this.columnLabel(column),
+            explicitLabel: column.label !== null,
+            done: column.done,
+            isNew: false,
+          })),
+          fields: board.fields.map(field => ({
+            uid: ++this.rowCount,
+            id: field.id,
+            type: field.type,
+            valuesText: (field.values || []).join(', '),
+            isNew: false,
+          })),
+        };
+        this.settings.original = this.settingsForm();
+      } catch (e) {
+        console.error('Failed to open the board settings:', e);
+        this.$refs.settings.close();
+        this.showNotice(text.open_error);
+      }
+    },
+
+    settingsForm() {
+      return JSON.stringify([this.settings.columns, this.settings.fields]);
+    },
+
+    settingsDirty() {
+      return !this.settings.loading && !this.settings.invalid && this.settingsForm() !== this.settings.original;
+    },
+
+    closeSettings() {
+      if (this.settingsDirty() && !confirm(text.unsaved)) return;
+      this.$refs.settings.close();
+    },
+
+    addColumn() {
+      this.settings.columns.push({ uid: ++this.rowCount, id: '', label: '', explicitLabel: true, done: false, isNew: true });
+    },
+
+    addField() {
+      this.settings.fields.push({ uid: ++this.rowCount, id: '', type: 'text', valuesText: '', isNew: true });
+    },
+
+    moveRow(rows, index, delta) {
+      rows.splice(index + delta, 0, rows.splice(index, 1)[0]);
+    },
+
+    // Ids come from the name while a column is new, and stay fixed after that.
+    settingsColumnIds() {
+      const columns = this.settings.columns;
+      const used = new Set(columns.filter(column => !column.isNew).map(column => column.id));
+      const ids = {};
+      for (const column of columns) {
+        if (!column.isNew) {
+          ids[column.uid] = column.id;
+        } else if (column.label.trim()) {
+          const base = kanbanSlug(column.label) || 'column';
+          let id = base;
+          for (let n = 2; used.has(id); n++) id = base + '-' + n;
+          used.add(id);
+          ids[column.uid] = id;
+        }
+      }
+      return ids;
+    },
+
+    columnCardCount(columnId) {
+      return this.board ? this.board.cards.filter(card => card.status === columnId).length : 0;
+    },
+
+    columnCountLabel(column) {
+      const count = column.isNew ? 0 : this.columnCardCount(column.id);
+      return count === 1 ? text.cards_one : text.cards_many.replace('{n}', count);
+    },
+
+    canRemoveColumn(column) {
+      return this.settings.columns.length > 1 && (column.isNew || this.columnCardCount(column.id) === 0);
+    },
+
+    // Returns the columns and fields to write, or null after setting the error to show.
+    settingsToSave() {
+      const ids = this.settingsColumnIds();
+      const columns = this.settings.columns
+        .filter(column => ids[column.uid])
+        .map(column => {
+          const label = column.label.trim();
+          const fallback = text.columns[ids[column.uid]] || ids[column.uid];
+          return {
+            id: ids[column.uid],
+            // A default name stays out of the file, so it keeps following the language.
+            label: column.explicitLabel || label !== fallback ? label : '',
+            done: column.done,
+          };
+        });
+      if (!columns.length) {
+        this.settings.error = text.needs_column;
+        return null;
+      }
+
+      const fields = [];
+      const names = new Set();
+      for (const field of this.settings.fields) {
+        const id = field.isNew ? kanbanSlug(field.id) : field.id;
+        if (!id) continue;
+        const values = kanbanSplitList(field.valuesText);
+        let error = '';
+        if (id === 'status' || id === 'tags') error = text.field_reserved;
+        else if (names.has(id)) error = text.field_duplicate;
+        else if (field.type === 'list' && !values.length) error = text.field_needs_values;
+        if (error) {
+          this.settings.error = error.replace('{name}', id);
+          return null;
+        }
+        names.add(id);
+        fields.push({ id, type: field.type, values });
+      }
+      return { columns, fields };
+    },
+
+    async saveSettings() {
+      const settings = this.settings;
+      if (settings.loading || settings.saving || settings.conflict || settings.invalid) return;
+      if (settings.hasFile && !this.settingsDirty()) {
+        this.$refs.settings.close();
+        return;
+      }
+      settings.error = '';
+      const schema = this.settingsToSave();
+      if (!schema) return;
+
+      settings.saving = true;
+      const path = this.notePath('_board.md');
+      try {
+        // Without a file there is no hash to compare, so check that it is still missing.
+        if (!settings.hasFile) {
+          const existing = await fetch(this.noteApiUrl(path) + '?include_backlinks=false');
+          if (existing.status !== 404) {
+            settings.conflict = true;
+            return;
+          }
+        }
+        const content = kanbanSetBoardBlock(settings.content, kanbanBoardBlock(schema.columns, schema.fields));
+        const response = await fetch(this.noteApiUrl(path), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(settings.hash ? { content, base_hash: settings.hash } : { content }),
+        });
+        if (response.status === 401) {
+          location.href = '/login';
+          return;
+        }
+        if (response.status === 409) {
+          settings.conflict = true;
+          return;
+        }
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        this.$refs.settings.close();
+        await this.load();
+      } catch (e) {
+        console.error('Failed to save the board settings:', e);
+        settings.error = text.save_error;
+      } finally {
+        settings.saving = false;
+      }
+    },
+
     warningText(card, warning) {
       if (warning === 'unknown_status') return text.unknown_status.replace('{status}', card.status);
       return text[warning] || warning;
@@ -1149,6 +1444,9 @@ function kanbanBoard() {
         <button class="btn" type="button" @click="createBoardFile()" x-text="text.create_board"></button>
       </template>
       <button class="btn btn-primary" type="button" x-cloak x-show="board" @click="openNewCard(activeColumn)" x-text="text.new_card"></button>
+      <button class="btn btn-icon" type="button" x-cloak x-show="board" @click="openSettings()" :title="text.settings" :aria-label="text.settings">
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
       <button class="btn btn-icon" type="button" @click="load()" :title="text.reload" :aria-label="text.reload">
         <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v5h5M20 20v-5h-5"/><path d="M5.5 15a7.5 7.5 0 0012.8 2.5L20 15M18.5 9A7.5 7.5 0 005.7 6.5L4 9"/></svg>
       </button>
@@ -1318,6 +1616,88 @@ function kanbanBoard() {
             <button class="btn" type="button" x-show="edit.conflict" @click="discardAndReload()" x-text="text.discard_reload"></button>
             <button class="btn" type="button" @click="closeEditor()" x-text="text.cancel"></button>
             <button class="btn btn-primary" type="submit" :disabled="edit.saving || edit.conflict" x-text="text.save"></button>
+          </div>
+        </div>
+      </template>
+    </form>
+  </dialog>
+
+  <dialog class="editor" x-ref="settings" tabindex="-1" @cancel.prevent="closeSettings()" @click.self="closeSettings()">
+    <form class="editor-form" @submit.prevent="saveSettings()">
+      <div class="editor-head">
+        <h2 x-text="text.settings"></h2>
+        <template x-if="settings.hasFile">
+          <a class="editor-link" :href="noteUrl({ path: notePath('_board.md') })" target="_blank" rel="noopener">
+            <span x-text="text.open_board_file"></span>
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5m0-5l-8 8M10 5H6a1 1 0 00-1 1v12a1 1 0 001 1h12a1 1 0 001-1v-4"/></svg>
+          </a>
+        </template>
+        <button class="btn btn-icon" type="button" @click="closeSettings()" :title="text.close" :aria-label="text.close">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+
+      <p class="state" x-show="settings.loading" x-text="text.loading"></p>
+      <p class="warning" style="margin: 0" x-show="settings.invalid" x-text="text.board_invalid_edit"></p>
+
+      <template x-if="!settings.loading && !settings.invalid">
+        <div style="display: contents">
+          <p class="warning" style="margin: 0 0 10px" x-show="settings.hasComments" x-text="text.comments_warning"></p>
+
+          <section class="settings-section">
+            <h3 x-text="text.columns_title"></h3>
+            <p class="settings-hint" x-text="text.hint_columns"></p>
+            <template x-for="(column, index) in settings.columns" :key="column.uid">
+              <div class="settings-row">
+                <input class="settings-input" type="text" x-model="column.label" :aria-label="text.column_name" :placeholder="text.column_name">
+                <span class="settings-id" x-text="(settingsColumnIds()[column.uid] || '…') + ' · ' + columnCountLabel(column)"></span>
+                <label class="settings-check">
+                  <input type="checkbox" x-model="column.done">
+                  <span x-text="text.finished"></span>
+                </label>
+                <span class="settings-actions">
+                  <button class="btn btn-icon" type="button" :disabled="index === 0" @click="moveRow(settings.columns, index, -1)" :title="text.move_up" :aria-label="text.move_up"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
+                  <button class="btn btn-icon" type="button" :disabled="index === settings.columns.length - 1" @click="moveRow(settings.columns, index, 1)" :title="text.move_down" :aria-label="text.move_down"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button>
+                  <button class="btn btn-icon" type="button" :disabled="!canRemoveColumn(column)" @click="settings.columns.splice(index, 1)" :title="text.remove" :aria-label="text.remove"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
+                </span>
+              </div>
+            </template>
+            <button class="btn settings-add" type="button" @click="addColumn()" x-text="text.add_column"></button>
+          </section>
+
+          <section class="settings-section">
+            <h3 x-text="text.fields_title"></h3>
+            <p class="settings-hint" x-text="text.hint_fields"></p>
+            <template x-for="(field, index) in settings.fields" :key="field.uid">
+              <div class="settings-row">
+                <template x-if="field.isNew">
+                  <input class="settings-input" type="text" x-model="field.id" @blur="field.id = kanbanSlug(field.id)" :aria-label="text.field_name" :placeholder="text.field_name">
+                </template>
+                <template x-if="!field.isNew">
+                  <span class="settings-id" x-text="field.id"></span>
+                </template>
+                <select class="settings-input settings-select" x-model="field.type" :aria-label="text.field_type">
+                  <option value="date" :selected="field.type === 'date'" x-text="text.type_date"></option>
+                  <option value="text" :selected="field.type === 'text'" x-text="text.type_text"></option>
+                  <option value="list" :selected="field.type === 'list'" x-text="text.type_list"></option>
+                </select>
+                <span class="settings-actions">
+                  <button class="btn btn-icon" type="button" :disabled="index === 0" @click="moveRow(settings.fields, index, -1)" :title="text.move_up" :aria-label="text.move_up"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
+                  <button class="btn btn-icon" type="button" :disabled="index === settings.fields.length - 1" @click="moveRow(settings.fields, index, 1)" :title="text.move_down" :aria-label="text.move_down"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button>
+                  <button class="btn btn-icon" type="button" @click="settings.fields.splice(index, 1)" :title="text.remove" :aria-label="text.remove"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
+                </span>
+                <input class="settings-input" style="flex-basis: 100%" type="text" x-show="field.type === 'list'" x-model="field.valuesText" :aria-label="text.list_values" :placeholder="text.list_values">
+              </div>
+            </template>
+            <button class="btn settings-add" type="button" @click="addField()" x-text="text.add_field"></button>
+          </section>
+
+          <p class="editor-message" x-show="settings.conflict" x-text="text.settings_conflict"></p>
+          <p class="editor-message" x-show="settings.error" x-text="settings.error"></p>
+          <div class="form-actions">
+            <button class="btn" type="button" x-show="settings.conflict" @click="fillSettings()" x-text="text.discard_reload"></button>
+            <button class="btn" type="button" @click="closeSettings()" x-text="text.cancel"></button>
+            <button class="btn btn-primary" type="submit" :disabled="settings.saving || settings.conflict" x-text="text.save"></button>
           </div>
         </div>
       </template>
