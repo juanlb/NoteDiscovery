@@ -121,6 +121,43 @@ inside the handler if it should go quiet when toggled off.
 The bundled `note_stats` plugin uses both of these — see `plugins/note_stats.py`
 for a working example.
 
+## UI Actions
+
+A plugin can add a link to the folder actions of the app by returning data from
+`get_ui()`. Plugins never send JavaScript or HTML to the app: this keeps the
+extension point small and means an installed plugin cannot change the page.
+
+```python
+class Plugin:
+    # ... name / version / enabled as above ...
+
+    def get_ui(self):
+        return {
+            "folder_actions": [
+                {
+                    "id": "open_board",
+                    "label": {"en": "Open as board", "es": "Abrir como tablero"},
+                    "icon": "board",
+                    "url": "/api/plugins/my_plugin/board?folder={folder}"
+                }
+            ]
+        }
+```
+
+| Field | Meaning |
+|-------|---------|
+| `id` | Unique name for the action |
+| `label` | Text, or a dictionary of language code to text. Falls back to `en` |
+| `icon` | `board` or `link`. Any other value shows `link` |
+| `url` | Must start with `/api/plugins/<plugin_id>/`. `{folder}` becomes the URL-encoded folder path |
+
+An action that breaks these rules is dropped and logged. The action shows on the
+folder cards and rows of the homepage, in the homepage breadcrumb and in the sidebar
+folder buttons, and it opens in the same tab.
+
+`GET /api/plugins` returns the actions in a `ui` key, only for enabled plugins. The
+app reads them once at startup, so toggling a plugin takes effect on the next reload.
+
 ## Basic Example: Note Logger
 
 This simple plugin logs note activity to Docker logs (visible with `docker-compose logs -f`):
