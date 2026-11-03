@@ -183,7 +183,8 @@ def _read_board_config(folder: Path) -> dict:
 
     columns = _string_list(raw.get("columns")) or DEFAULT_COLUMNS
     labels = raw.get("labels") if isinstance(raw.get("labels"), dict) else {}
-    done = _string_list(raw.get("done")) or DEFAULT_DONE
+    # An empty list is a valid choice: a board with no finished columns.
+    done = _string_list(raw["done"]) if "done" in raw else DEFAULT_DONE
     raw_fields = raw.get("fields") if isinstance(raw.get("fields"), dict) else DEFAULT_FIELDS
 
     return {
