@@ -388,6 +388,8 @@ function kanbanApplyTheme() {
       document.head.appendChild(style);
     }
     style.textContent = theme.css;
+    // Native controls, like the date picker icon, follow the theme this way.
+    document.documentElement.style.colorScheme = /@theme-type:\s*light/.test(theme.css) ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', id);
   } catch (e) {
     console.error('Failed to load theme:', e);
