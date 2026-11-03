@@ -730,7 +730,9 @@ function kanbanBoardHasComments(content) {
   const lines = content.split('\n');
   const end = kanbanFrontmatterEnd(lines);
   const range = end < 0 ? null : kanbanBoardBlockRange(lines, end);
-  return !!range && lines.slice(range.start, range.last + 1).some(line => /(^|\s)#/.test(line));
+  // A # inside a quoted value, like "Review: #1", is not a comment.
+  const withoutQuotes = line => line.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '');
+  return !!range && lines.slice(range.start, range.last + 1).some(line => /(^|\s)#/.test(withoutQuotes(line)));
 }
 
 function kanbanSetBoardBlock(content, block) {
