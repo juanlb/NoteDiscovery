@@ -9,6 +9,8 @@ Caveats: Only reads the notes directly inside the folder, never subfolders.
          Moving a card edits only the `status:` line, through core's save endpoint,
          so save hooks and the index behave as with a normal edit. Core saves with
          LF line endings, so a move also converts a CRLF note to LF, as any save does.
+         Changing tags in the panel writes them as `tags: [a, b]`, which replaces a
+         multi-line list and any comments inside it.
          Reads frontmatter straight from disk, because plugins have no access to
          on_note_load. Not compatible with plugins that transform note content on
          disk (for example, encryption): those cards land in the first column.
@@ -44,6 +46,9 @@ Card: any .md in the folder. Files starting with "_" or "." are not cards.
 
 A missing or unknown status puts the card in the first column, so no card is lost.
 The title is the first "# heading", or the file name when there is none.
+
+Clicking a card title opens a panel to edit its status, tags, fields and raw Markdown
+body. Everything else, like preview or wikilink autocomplete, stays in the full note.
 """
 
 import logging
@@ -410,6 +415,17 @@ dialog h2 { margin: 0 0 12px; font-size: 16px; }
 .form-row { display: block; margin-bottom: 12px; font-size: 12px; color: var(--text-secondary); }
 .form-row input, .form-row select { display: block; width: 100%; height: 38px; margin-top: 4px; padding: 0 8px; border: 1px solid var(--border-primary); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary); font: inherit; font-size: 14px; }
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; }
+dialog.editor { width: min(640px, 100vw); max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0 0 0 auto; padding: 0; border: 0; border-left: 1px solid var(--border-primary); border-radius: 0; outline: none; }
+.editor-form { display: flex; flex-direction: column; height: 100%; padding: 16px; overflow-y: auto; }
+.editor-head { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 12px; }
+dialog.editor h2 { flex: 1; min-width: 0; margin: 4px 0 0; overflow-wrap: anywhere; }
+.editor-link { display: inline-flex; flex-shrink: 0; align-items: center; gap: 4px; height: 34px; font-size: 12px; color: var(--accent-primary); text-decoration: none; }
+.editor-link:hover { text-decoration: underline; }
+.editor-fields { display: grid; flex-shrink: 0; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+.editor-fields .form-wide { grid-column: 1 / -1; }
+.editor-body { flex: 1 0 240px; width: 100%; padding: 10px; border: 1px solid var(--border-primary); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary); font: 13px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; resize: none; }
+.editor-message { flex-shrink: 0; margin: 10px 0 0; color: var(--kanban-error); font-size: 12px; }
+.editor-form .form-actions { flex-shrink: 0; margin-top: 12px; }
 
 .filters { display: flex; align-items: center; gap: 10px; padding: 10px 20px; }
 .chips { display: flex; flex: 1; min-width: 0; flex-wrap: wrap; gap: 6px; }
@@ -474,6 +490,10 @@ dialog h2 { margin: 0 0 12px; font-size: 16px; }
   .btn { height: 44px; }
   .btn-icon { width: 44px; }
   .form-row input, .form-row select { height: 44px; font-size: 16px; }
+  dialog.editor { border-left: 0; }
+  .editor-fields { grid-template-columns: 1fr; }
+  .editor-body { font-size: 16px; }
+  .editor-link { height: 44px; }
   .filters { padding: 10px 16px; }
   .chips { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
   .chip-btn { height: 44px; padding: 0 12px; }
@@ -503,6 +523,11 @@ const KANBAN_TEXT = {
     no_notes: 'No notes in this folder', no_cards: 'No cards', no_matches: 'No cards match the filter',
     load_error: 'Could not load the board', move_to: 'Move to…', move_to_column: 'Move to {column}',
     conflict: 'The card changed, reloading', move_error: 'Could not move the card',
+    open_full: 'Open full note', close: 'Close', save: 'Save', status: 'Status', tags: 'Tags (comma separated)', body: 'Note text',
+    unsaved: 'Discard the unsaved changes?', save_error: 'Could not save the note', open_error: 'Could not open the note',
+    edit_conflict: 'The note changed while you were editing. Nothing was saved, and your text is still here so you can copy it.',
+    discard_reload: 'Discard and reload', raw_hint: 'The frontmatter is invalid, so this shows the whole file.',
+    field_names: { due: 'Due date', priority: 'Priority', owner: 'Owner' },
     new_card: 'New card', new_card_in: 'New card in {column}', title: 'Title', column: 'Column', create: 'Create', cancel: 'Cancel',
     create_error: 'Could not create the note', create_board: 'Create _board.md', invalid_frontmatter: 'Invalid frontmatter',
     unknown_status: 'Unknown status: {status}', invalid_board: 'Invalid _board.md, using the default columns',
@@ -515,6 +540,11 @@ const KANBAN_TEXT = {
     no_notes: 'No hay notas en esta carpeta', no_cards: 'Sin cards', no_matches: 'Ninguna card coincide con el filtro',
     load_error: 'No se pudo cargar el tablero', move_to: 'Mover a…', move_to_column: 'Mover a {column}',
     conflict: 'La card cambió, recargando', move_error: 'No se pudo mover la card',
+    open_full: 'Abrir nota completa', close: 'Cerrar', save: 'Guardar', status: 'Status', tags: 'Tags (separados por coma)', body: 'Texto de la nota',
+    unsaved: '¿Descartar los cambios sin guardar?', save_error: 'No se pudo guardar la nota', open_error: 'No se pudo abrir la nota',
+    edit_conflict: 'La nota cambió mientras editabas. No se guardó nada, y tu texto sigue acá para que lo copies.',
+    discard_reload: 'Descartar y recargar', raw_hint: 'El frontmatter es inválido, así que se muestra el archivo entero.',
+    field_names: { due: 'Vence', priority: 'Prioridad', owner: 'Responsable' },
     new_card: 'Nueva card', new_card_in: 'Nueva card en {column}', title: 'Título', column: 'Columna', create: 'Crear', cancel: 'Cancelar',
     create_error: 'No se pudo crear la nota', create_board: 'Crear _board.md', invalid_frontmatter: 'Frontmatter inválido',
     unknown_status: 'Status desconocido: {status}', invalid_board: '_board.md inválido, se usan las columnas por defecto',
@@ -540,29 +570,77 @@ function kanbanYamlValue(status) {
   return /^[\p{L}\p{N}_][\p{L}\p{N}_ .-]*$/u.test(status) ? status : JSON.stringify(status);
 }
 
-// Touches only the status line, never the rest of the frontmatter, so comments, order
-// and formatting survive. A trailing comment on that line is kept too.
-function kanbanSetStatus(content, status) {
-  const value = kanbanYamlValue(status);
+function kanbanFrontmatterEnd(lines) {
+  if (lines[0].trim() !== '---') return -1;
+  return lines.findIndex((line, index) => index > 0 && line.trim() === '---');
+}
+
+// Touches only this field's line, never the rest of the frontmatter, so comments, order
+// and formatting survive. A trailing comment on that line is kept too. An empty value
+// removes the line.
+function kanbanSetField(content, key, newValue) {
+  const value = newValue ? kanbanYamlValue(newValue) : '';
   const lines = content.split('\n');
-  const end = lines[0].trim() === '---'
-    ? lines.findIndex((line, index) => index > 0 && line.trim() === '---')
-    : -1;
+  const end = kanbanFrontmatterEnd(lines);
 
-  if (end < 0) return '---\nstatus: ' + value + '\n---\n' + content;
+  if (end < 0) return value ? '---\n' + key + ': ' + value + '\n---\n' + content : content;
 
+  const name = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp('^(' + name + '[ \\t]*:[ \\t]*)(.*?)([ \\t]+#.*)?$');
   let found = false;
-  for (let i = 1; i < end; i++) {
-    const match = /^(status[ \t]*:[ \t]*)(.*?)([ \t]+#.*)?$/.exec(lines[i]);
-    if (match) {
-      // `status:` with no value has no space after the colon yet.
-      const prefix = /\s$/.test(match[1]) ? match[1] : match[1] + ' ';
-      lines[i] = prefix + value + (match[3] || '');
-      found = true;
+  const edited = lines.flatMap((line, index) => {
+    const match = index > 0 && index < end ? pattern.exec(line) : null;
+    if (!match) return [line];
+    found = true;
+    if (!value) return [];
+    // `status:` with no value has no space after the colon yet.
+    const prefix = /\s$/.test(match[1]) ? match[1] : match[1] + ' ';
+    return [prefix + value + (match[3] || '')];
+  });
+  if (!found && value) edited.splice(end, 0, key + ': ' + value);
+  return edited.join('\n');
+}
+
+// Tags are written unquoted, because core's parse_tags keeps quotes as part of the tag.
+function kanbanParseTags(text) {
+  const tags = text.split(',')
+    .map(tag => tag.replace(/[\[\]]/g, '').trim().replace(/^#+/, '').trim().toLowerCase())
+    .filter(Boolean);
+  return [...new Set(tags)];
+}
+
+function kanbanSetTags(content, tags) {
+  const value = tags.length ? 'tags: [' + tags.join(', ') + ']' : '';
+  const lines = content.split('\n');
+  const end = kanbanFrontmatterEnd(lines);
+
+  if (end < 0) return value ? '---\n' + value + '\n---\n' + content : content;
+
+  const start = lines.findIndex((line, index) => index > 0 && index < end && /^tags[ \t]*:/.test(line));
+  if (start < 0) {
+    if (value) lines.splice(end, 0, value);
+    return lines.join('\n');
+  }
+
+  // A multi-line list ends at its last item, so a comment before the next key survives.
+  let last = start;
+  if (/^tags[ \t]*:[ \t]*(#.*)?$/.test(lines[start])) {
+    for (let i = start + 1; i < end && /^\s*(-|#|$)/.test(lines[i]); i++) {
+      if (/^\s*-/.test(lines[i])) last = i;
     }
   }
-  if (!found) lines.splice(end, 0, 'status: ' + value);
+  lines.splice(start, last - start + 1, ...(value ? [value] : []));
   return lines.join('\n');
+}
+
+// Exact split, so saving an untouched body gives back the same bytes.
+function kanbanSplitNote(content) {
+  const lines = content.split('\n');
+  const end = kanbanFrontmatterEnd(lines);
+  if (end < 0) return { head: '', body: content };
+  let length = lines.slice(0, end + 1).join('\n').length;
+  if (content[length] === '\n') length++;
+  return { head: content.slice(0, length), body: content.slice(length) };
 }
 
 function kanbanBoard() {
@@ -584,6 +662,7 @@ function kanbanBoard() {
     notice: '',
     newTitle: '',
     newColumn: null,
+    edit: { title: '', url: '', raw: false, loading: false, saving: false, conflict: false, error: '', status: '', tagsText: '', fields: {}, body: '', original: { fields: {} } },
 
     init() {
       document.documentElement.lang = text === KANBAN_TEXT.es ? 'es' : 'en';
@@ -789,7 +868,7 @@ function kanbanBoard() {
         const saved = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: kanbanSetStatus(note.content, status), base_hash: note.hash }),
+          body: JSON.stringify({ content: kanbanSetField(note.content, 'status', status), base_hash: note.hash }),
         });
         if (saved.status === 401) {
           location.href = '/login';
@@ -878,6 +957,170 @@ function kanbanBoard() {
       await this.load();
     },
 
+    // A modified or middle click keeps working as a plain link to the note.
+    onTitleClick(event, card) {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      this.openEditor(card);
+    },
+
+    async fetchNote(path) {
+      const response = await fetch(this.noteApiUrl(path) + '?include_backlinks=false');
+      if (response.status === 401) location.href = '/login';
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      return response.json();
+    },
+
+    async openEditor(card) {
+      this.edit = { ...this.edit, title: card.title, url: this.noteUrl(card), loading: true, conflict: false, error: '', body: '' };
+      this.$refs.editor.showModal();
+      this.$refs.editor.focus();
+      try {
+        let note = await this.fetchNote(card.path);
+        // The form starts from the card data, so that data has to match this note.
+        if (note.metadata.modified !== card.mtime) {
+          await this.load();
+          card = this.board.cards.find(c => c.path === card.path);
+          if (!card) throw new Error('Note not found');
+          note = await this.fetchNote(card.path);
+        }
+        this.fillEditor(card, note);
+      } catch (e) {
+        console.error('Failed to open the note:', e);
+        this.$refs.editor.close();
+        this.showNotice(text.open_error);
+        await this.load();
+      }
+    },
+
+    fillEditor(card, note) {
+      const raw = card.warnings.includes('invalid_frontmatter');
+      const { head, body } = raw ? { head: '', body: note.content } : kanbanSplitNote(note.content);
+      const known = this.board.columns.some(column => column.id === card.status);
+      const fields = {};
+      for (const field of this.board.fields) fields[field.id] = card.fields[field.id] || '';
+      const form = { status: known ? card.status : '', tagsText: card.tags.join(', '), fields, body };
+
+      this.edit = {
+        ...this.edit,
+        ...form,
+        fields: { ...fields },
+        title: card.title,
+        path: card.path,
+        raw,
+        head,
+        content: note.content,
+        hash: note.hash,
+        loading: false,
+        conflict: false,
+        error: '',
+        card,
+        original: JSON.parse(JSON.stringify(form)),
+      };
+    },
+
+    editorForm() {
+      const { status, tagsText, fields, body } = this.edit;
+      return JSON.stringify({ status, tagsText, fields, body });
+    },
+
+    editorDirty() {
+      return !this.edit.loading && !!this.edit.original.fields && this.editorForm() !== JSON.stringify(this.edit.original);
+    },
+
+    closeEditor() {
+      if (this.editorDirty() && !confirm(text.unsaved)) return;
+      this.$refs.editor.close();
+    },
+
+    fieldLabel(field) {
+      return text.field_names[field.id] || field.id;
+    },
+
+    optionLabel(value) {
+      return text.priorities[value] || value;
+    },
+
+    // A value outside the list stays selectable, so opening the panel never changes it.
+    fieldOptions(field) {
+      const current = this.edit.original.fields[field.id];
+      return current && !field.values.includes(current) ? [...field.values, current] : field.values;
+    },
+
+    // A date the browser cannot show stays editable as text instead of looking empty.
+    fieldInputType(field) {
+      const value = this.edit.original.fields[field.id];
+      return field.type === 'date' && (!value || this.parseDate(value)) ? 'date' : 'text';
+    },
+
+    editedContent() {
+      const edit = this.edit;
+      if (edit.raw) return edit.body;
+
+      let content = edit.head + edit.body;
+      if (edit.status && edit.status !== edit.original.status) {
+        content = kanbanSetField(content, 'status', edit.status);
+      }
+      for (const field of this.board.fields) {
+        const value = edit.fields[field.id].trim();
+        if (value !== edit.original.fields[field.id]) content = kanbanSetField(content, field.id, value);
+      }
+      const tags = kanbanParseTags(edit.tagsText);
+      const sameTags = [...tags].sort().join() === [...kanbanParseTags(edit.original.tagsText)].sort().join();
+      return sameTags ? content : kanbanSetTags(content, tags);
+    },
+
+    async saveEditor() {
+      if (this.edit.loading || this.edit.saving || this.edit.conflict) return;
+      const content = this.editedContent();
+      if (content === this.edit.content) {
+        this.$refs.editor.close();
+        return;
+      }
+
+      this.edit.saving = true;
+      this.edit.error = '';
+      try {
+        const response = await fetch(this.noteApiUrl(this.edit.path), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content, base_hash: this.edit.hash }),
+        });
+        if (response.status === 401) {
+          location.href = '/login';
+          return;
+        }
+        if (response.status === 409) {
+          this.edit.conflict = true;
+          return;
+        }
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        this.$refs.editor.close();
+        await this.load();
+      } catch (e) {
+        console.error('Failed to save the note:', e);
+        this.edit.error = text.save_error;
+      } finally {
+        this.edit.saving = false;
+      }
+    },
+
+    async discardAndReload() {
+      await this.load();
+      const card = this.board.cards.find(c => c.path === this.edit.path);
+      if (!card) {
+        this.$refs.editor.close();
+        this.showNotice(text.open_error);
+        return;
+      }
+      try {
+        this.fillEditor(card, await this.fetchNote(card.path));
+      } catch (e) {
+        console.error('Failed to reload the note:', e);
+        this.edit.error = text.open_error;
+      }
+    },
+
     warningText(card, warning) {
       if (warning === 'unknown_status') return text.unknown_status.replace('{status}', card.status);
       return text[warning] || warning;
@@ -961,7 +1204,7 @@ function kanbanBoard() {
                          @dragstart="draggedPath = card.path; $event.dataTransfer.effectAllowed = 'move'; $event.dataTransfer.setData('text/plain', card.path)"
                          @dragend="draggedPath = null; dropColumn = null">
                   <div class="card-top">
-                    <a class="card-title" :href="noteUrl(card)" draggable="false" x-text="card.title"></a>
+                    <a class="card-title" :href="noteUrl(card)" draggable="false" @click="onTitleClick($event, card)" x-text="card.title"></a>
                     <template x-if="priorityValue(card)">
                       <span class="priority" :class="priorityClass(card)" x-text="priorityLabel(card)"></span>
                     </template>
@@ -1015,6 +1258,68 @@ function kanbanBoard() {
       </main>
     </div>
   </template>
+
+  <dialog class="editor" x-ref="editor" tabindex="-1" @cancel.prevent="closeEditor()" @click.self="closeEditor()">
+    <form class="editor-form" @submit.prevent="saveEditor()">
+      <div class="editor-head">
+        <h2 x-text="edit.title"></h2>
+        <a class="editor-link" :href="edit.url" target="_blank" rel="noopener">
+          <span x-text="text.open_full"></span>
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5m0-5l-8 8M10 5H6a1 1 0 00-1 1v12a1 1 0 001 1h12a1 1 0 001-1v-4"/></svg>
+        </a>
+        <button class="btn btn-icon" type="button" @click="closeEditor()" :title="text.close" :aria-label="text.close">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+
+      <p class="state" x-show="edit.loading" x-text="text.loading"></p>
+
+      <template x-if="!edit.loading">
+        <div style="display: contents">
+          <p class="warning" style="margin: 0 0 10px" x-show="edit.raw" x-text="text.raw_hint"></p>
+          <div class="editor-fields" x-show="!edit.raw">
+            <label class="form-row">
+              <span x-text="text.status"></span>
+              <select x-model="edit.status">
+                <option value="" disabled>—</option>
+                <template x-for="column in board ? board.columns : []" :key="column.id">
+                  <option :value="column.id" :selected="column.id === edit.status" x-text="columnLabel(column)"></option>
+                </template>
+              </select>
+            </label>
+            <template x-for="field in board ? board.fields : []" :key="field.id">
+              <label class="form-row">
+                <span x-text="fieldLabel(field)"></span>
+                <template x-if="field.type === 'list'">
+                  <select x-model="edit.fields[field.id]">
+                    <option value="">—</option>
+                    <template x-for="value in fieldOptions(field)" :key="value">
+                      <option :value="value" :selected="value === edit.fields[field.id]" x-text="optionLabel(value)"></option>
+                    </template>
+                  </select>
+                </template>
+                <template x-if="field.type !== 'list'">
+                  <input :type="fieldInputType(field)" x-model="edit.fields[field.id]">
+                </template>
+              </label>
+            </template>
+            <label class="form-row form-wide">
+              <span x-text="text.tags"></span>
+              <input type="text" x-model="edit.tagsText">
+            </label>
+          </div>
+          <textarea class="editor-body" x-model="edit.body" :aria-label="text.body"></textarea>
+          <p class="editor-message" x-show="edit.conflict" x-text="text.edit_conflict"></p>
+          <p class="editor-message" x-show="edit.error" x-text="edit.error"></p>
+          <div class="form-actions">
+            <button class="btn" type="button" x-show="edit.conflict" @click="discardAndReload()" x-text="text.discard_reload"></button>
+            <button class="btn" type="button" @click="closeEditor()" x-text="text.cancel"></button>
+            <button class="btn btn-primary" type="submit" :disabled="edit.saving || edit.conflict" x-text="text.save"></button>
+          </div>
+        </div>
+      </template>
+    </form>
+  </dialog>
 
   <dialog x-ref="newCard">
     <form @submit.prevent="createCard()">
