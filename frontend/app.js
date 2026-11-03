@@ -2909,7 +2909,7 @@ function noteApp() {
                             </span>
                         </div>
                         <div class="hover-buttons flex gap-1 transition-opacity absolute right-2 top-1/2 transform -translate-y-1/2" style="opacity: 0; pointer-events: none; background: linear-gradient(to right, transparent, var(--bg-hover) 20%, var(--bg-hover)); padding-left: 20px;" onclick="event.stopPropagation()">
-                            ${this.pluginFolderActions.map(action => `
+                            ${this.pluginActionsFor(folder.path, 'sidebar').map(action => `
                             <a
                                 href="${esc(this.pluginActionUrl(action, folder.path))}"
                                 draggable="false"
@@ -7971,6 +7971,20 @@ function noteApp() {
                 this.statsPluginEnabled = false;
                 this.pluginFolderActions = [];
             }
+        },
+
+        // Uses the note list the app already holds, so this adds no request.
+        folderHasFile(folderPath, fileName) {
+            const notes = this.getFolderNode(folderPath)?.notes || [];
+            return notes.some(note => note.path === `${folderPath}/${fileName}`);
+        },
+
+        pluginActionsFor(folderPath, place) {
+            return this.pluginFolderActions.filter(action =>
+                (!action.places || action.places.includes(place))
+                && (!action.when_file || this.folderHasFile(folderPath, action.when_file))
+                && (!action.unless_file || !this.folderHasFile(folderPath, action.unless_file))
+            );
         },
 
         pluginActionLabel(action) {

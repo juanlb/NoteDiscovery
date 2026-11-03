@@ -138,7 +138,8 @@ class Plugin:
                     "id": "open_board",
                     "label": {"en": "Open as board", "es": "Abrir como tablero"},
                     "icon": "board",
-                    "url": "/api/plugins/my_plugin/board?folder={folder}"
+                    "url": "/api/plugins/my_plugin/board?folder={folder}",
+                    "when_file": "_board.md"
                 }
             ]
         }
@@ -150,10 +151,18 @@ class Plugin:
 | `label` | Text, or a dictionary of language code to text. Falls back to `en` |
 | `icon` | `board` or `link`. Any other value shows `link` |
 | `url` | Must start with `/api/plugins/<plugin_id>/`. `{folder}` becomes the URL-encoded folder path |
+| `when_file` | Optional. Show the action only if the folder directly contains this file |
+| `unless_file` | Optional. Show the action only if the folder does not contain this file |
+| `places` | Optional. Any of `homepage`, `breadcrumb` and `sidebar`. Default: all of them |
 
-An action that breaks these rules is dropped and logged. The action shows on the
-folder cards and rows of the homepage, in the homepage breadcrumb and in the sidebar
-folder buttons, and it opens in the same tab.
+An action that breaks these rules is dropped and logged. `homepage` covers the folder
+cards and rows, `breadcrumb` the current folder on the homepage, and `sidebar` the folder
+buttons. An action opens in the same tab. It is always a link, so a plugin that writes
+something when a link opens must keep that write safe to repeat and safe to trigger from
+another site.
+
+The file conditions use the note list the app loaded at startup, so a file that something
+else creates or deletes changes the action on the next reload.
 
 `GET /api/plugins` returns the actions in a `ui` key, only for enabled plugins. The
 app reads them once at startup, so toggling a plugin takes effect on the next reload.
