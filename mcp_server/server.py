@@ -122,7 +122,34 @@ class MCPServer:
     
     def handle_list_tools(self, params: dict) -> dict:
         """Handle tools/list request."""
-        return {"tools": TOOLS}
+        plugin_tools = [entry["definition"] for entry in self._plugin_tools().values()]
+        return {"tools": TOOLS + plugin_tools}
+
+    def _plugin_tools(self) -> dict[str, dict]:
+        """
+        MCP tools declared by enabled plugins, by name.
+
+        Asked on every request, so toggling a plugin takes effect without restarting
+        the stdio server. Core tools win a name clash.
+        """
+        response = self.client.list_plugins()
+        if not response.success or not isinstance(response.data, dict):
+            return {}
+        core_names = set(get_tool_names())
+        tools = {}
+        for plugin in response.data.get("plugins", []):
+            for tool in plugin.get("mcp_tools", []):
+                if tool["name"] not in core_names:
+                    tools[tool["name"]] = {"plugin": plugin["id"], "definition": tool}
+        return tools
+
+    def _call_plugin_tool(self, plugin_id: str, name: str, arguments: dict) -> dict:
+        """Run a plugin tool. The plugin's own route does the work."""
+        response = self.client.call_plugin_tool(plugin_id, name, arguments)
+        return {
+            "content": [{"type": "text", "text": self._format_response(response)}],
+            "isError": not response.success,
+        }
     
     def handle_call_tool(self, params: dict) -> dict:
         """
@@ -138,10 +165,14 @@ class MCPServer:
         # Dispatch to tool handler
         handler = getattr(self, f"_tool_{name}", None)
         if handler is None:
+            plugin_tools = self._plugin_tools()
+            if name in plugin_tools:
+                return self._call_plugin_tool(plugin_tools[name]["plugin"], name, arguments)
+            available = get_tool_names() + list(plugin_tools)
             return {
                 "content": [{
                     "type": "text",
-                    "text": f"Unknown tool: {name}. Available tools: {', '.join(get_tool_names())}",
+                    "text": f"Unknown tool: {name}. Available tools: {', '.join(available)}",
                 }],
                 "isError": True,
             }

@@ -478,6 +478,9 @@ See [PLUGINS.md](PLUGINS.md) for full documentation on creating plugins.
 GET /api/plugins
 ```
 
+An enabled plugin that declares MCP tools also returns an `mcp_tools` key. See
+[PLUGINS.md](PLUGINS.md#mcp-tools).
+
 ### Toggle Plugin
 ```http
 POST /api/plugins/{plugin_name}/toggle

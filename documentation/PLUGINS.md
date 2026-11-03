@@ -76,6 +76,8 @@ context always agrees with the running app, including `NOTES_DIR` overrides.
 | `ctx.plugins_dir` | `Path` to the plugins directory |
 | `ctx.config` | The resolved app config dict |
 | `ctx.logger` | Logger named for your plugin, output goes to the server log |
+| `ctx.read_note(path)` | A note's content after `on_note_load`, or `None` if it does not exist |
+| `ctx.write_note(path, content)` | Creates or replaces a note with the same hooks as the notes API, and updates the index |
 
 ```python
 class Plugin:
@@ -120,6 +122,45 @@ inside the handler if it should go quiet when toggled off.
 
 The bundled `note_stats` plugin uses both of these — see `plugins/note_stats.py`
 for a working example.
+
+## MCP Tools
+
+A plugin can give AI assistants its own tools by returning them from `get_mcp_tools()`.
+The MCP server lists them next to the core tools and sends each call to
+`POST /api/plugins/<plugin_id>/mcp/<tool_name>`, with the arguments as the JSON body.
+The plugin serves that route from `get_routes()`, so all its logic stays in the plugin.
+
+```python
+from fastapi import APIRouter, Body
+
+class Plugin:
+    # ... name / version / enabled as above ...
+
+    def get_mcp_tools(self):
+        return [
+            {
+                "name": "my_plugin_summary",
+                "description": "What the tool does, written for an AI assistant.",
+                "inputSchema": {"type": "object", "properties": {}, "required": []}
+            }
+        ]
+
+    def get_routes(self):
+        router = APIRouter()
+
+        @router.post("/mcp/my_plugin_summary")
+        def summary(args: dict = Body(default={})):
+            return {"notes": 42}
+
+        return router
+```
+
+A tool name must start with `<plugin_id>_` and use lowercase letters, numbers and `_`. A
+tool that breaks this is dropped and logged. Tools of a disabled plugin disappear from the
+list, and clients see the change the next time they ask for tools. An HTTP error from the
+route reaches the assistant as a failed tool call with its `detail` text.
+
+Use `ctx.write_note()` to change notes, so hooks and the index work as usual.
 
 ## Basic Example: Note Logger
 
