@@ -274,7 +274,16 @@ class Plugin:
                     "label": {"en": "Open as board", "es": "Abrir como tablero"},
                     "icon": "board",
                     "url": "/api/plugins/kanban_board/board?folder={folder}",
-                }
+                    "when_file": BOARD_FILE,
+                },
+                {
+                    "id": "create_board",
+                    "label": {"en": "Create board", "es": "Crear tablero"},
+                    "icon": "board",
+                    "url": "/api/plugins/kanban_board/board?folder={folder}&setup=1",
+                    "unless_file": BOARD_FILE,
+                    "places": ["breadcrumb"],
+                },
             ]
         }
 
@@ -602,7 +611,7 @@ function kanbanBoard() {
     init() {
       document.documentElement.lang = text === KANBAN_TEXT.es ? 'es' : 'en';
       document.title = this.folderName();
-      this.load();
+      this.start();
       // Shows what an agent changed while the tab was in the background.
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
@@ -610,6 +619,17 @@ function kanbanBoard() {
           this.load();
         }
       });
+    },
+
+    // setup=1 comes from the "Create board" folder action. createBoardFile never
+    // replaces an existing file, so opening this link twice changes nothing.
+    async start() {
+      await this.load();
+      const url = new URL(location.href);
+      if (!url.searchParams.has('setup')) return;
+      url.searchParams.delete('setup');
+      history.replaceState(null, '', url);
+      if (this.board && !this.board.has_board_file) await this.createBoardFile();
     },
 
     async load() {
