@@ -1200,8 +1200,9 @@ function kanbanBoard() {
       if (this.editorDirty() && !(await this.saveEditor(true))) return;
       if (mode === 'view') this.edit.html = kanbanRenderMarkdown(this.edit.body);
       this.edit.mode = mode;
-      // After x-show has run: a hidden textarea cannot take focus.
-      if (mode === 'edit') setTimeout(() => this.$refs.editorBody?.focus());
+      // x-show reveals the textarea on the next animation frame, and a hidden element
+      // cannot take focus.
+      if (mode === 'edit') setTimeout(() => this.$refs.editorBody?.focus(), 50);
     },
 
     editorForm() {
