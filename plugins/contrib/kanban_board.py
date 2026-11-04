@@ -1006,6 +1006,9 @@ dialog.editor h2 { flex: 1; min-width: 0; margin: 4px 0 0; overflow-wrap: anywhe
 .editor-tab[aria-pressed="true"] { border-color: var(--accent-primary); color: var(--text-primary); font-weight: 600; }
 .editor-view { flex: 1 0 240px; min-height: 0; padding: 10px 14px; border: 1px solid var(--border-primary); border-radius: 6px; overflow-y: auto; overflow-wrap: anywhere; }
 .editor-view.markdown-preview { font-size: 14px; line-height: 1.6; }
+.editor-view.markdown-preview h1 { margin-top: 0; font-size: 20px; }
+.editor-view.markdown-preview h2 { margin-top: 16px; font-size: 16px; }
+.editor-view.markdown-preview h3 { margin-top: 12px; font-size: 14px; }
 .editor-empty { color: var(--text-secondary); font-size: 13px; }
 .editor-message { flex-shrink: 0; margin: 10px 0 0; color: var(--kanban-error); font-size: 12px; }
 .editor-form .form-actions { flex-shrink: 0; margin-top: 12px; }
