@@ -61,8 +61,10 @@ Pass expected_mtime from kanban_board_get to refuse a card that changed in betwe
 Suggested convention: `owner: agent` marks the cards an agent can take without asking.
 The title is the first "# heading", or the file name when there is none.
 
-Clicking a card title opens a panel to edit its status, tags, fields and raw Markdown
-body. Everything else, like preview or wikilink autocomplete, stays in the full note.
+Clicking a card title opens a panel with its status, tags and fields, and the note
+rendered as Markdown. An Edit button shows the source, and switching saves. The rendering
+is simpler than the app's: no Mermaid, math, callouts, code highlighting or ![[media]],
+and a [[wikilink]] needs the full path. For those, the panel links to the full note.
 """
 
 import json
@@ -999,6 +1001,12 @@ dialog.editor h2 { flex: 1; min-width: 0; margin: 4px 0 0; overflow-wrap: anywhe
 .editor-fields { display: grid; flex-shrink: 0; grid-template-columns: 1fr 1fr; gap: 0 12px; }
 .editor-fields .form-wide { grid-column: 1 / -1; }
 .editor-body { flex: 1 0 240px; width: 100%; padding: 10px; border: 1px solid var(--border-primary); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary); font: 13px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; resize: none; }
+.editor-tabs { display: flex; flex-shrink: 0; gap: 4px; margin-bottom: 8px; }
+.editor-tab { height: 30px; padding: 0 12px; border: 1px solid var(--border-primary); border-radius: 6px; background: var(--bg-secondary); color: var(--text-secondary); }
+.editor-tab[aria-pressed="true"] { border-color: var(--accent-primary); color: var(--text-primary); font-weight: 600; }
+.editor-view { flex: 1 0 240px; min-height: 0; padding: 10px 14px; border: 1px solid var(--border-primary); border-radius: 6px; overflow-y: auto; overflow-wrap: anywhere; }
+.editor-view.markdown-preview { font-size: 14px; line-height: 1.6; }
+.editor-empty { color: var(--text-secondary); font-size: 13px; }
 .editor-message { flex-shrink: 0; margin: 10px 0 0; color: var(--kanban-error); font-size: 12px; }
 .editor-form .form-actions { flex-shrink: 0; margin-top: 12px; }
 .btn:disabled { opacity: .4; cursor: not-allowed; }
@@ -1080,6 +1088,7 @@ dialog.editor h2 { flex: 1; min-width: 0; margin: 4px 0 0; overflow-wrap: anywhe
   .editor-fields { grid-template-columns: 1fr; }
   .editor-body { font-size: 16px; }
   .editor-link { height: 44px; }
+  .editor-tab { height: 44px; flex: 1; }
   .settings-input { height: 44px; font-size: 16px; }
   .settings-check { min-height: 44px; }
   .filters { padding: 10px 16px; }
@@ -1122,6 +1131,7 @@ const KANBAN_TEXT = {
     field_reserved: 'A field cannot be named {name}.', field_duplicate: 'There are two fields named {name}.',
     field_needs_values: 'The list {name} needs at least one value.', needs_column: 'The board needs at least one column.',
     settings_conflict: '_board.md changed while you were editing. Nothing was saved, and your changes are still here.',
+    view_note: 'View', edit_note: 'Edit', empty_note: 'This note has no text.',
     open_full: 'Open full note', close: 'Close', save: 'Save', status: 'Status', tags: 'Tags (comma separated)', body: 'Note text',
     unsaved: 'Discard the unsaved changes?', save_error: 'Could not save the note', open_error: 'Could not open the note',
     edit_conflict: 'The note changed while you were editing. Nothing was saved, and your text is still here so you can copy it.',
@@ -1150,6 +1160,7 @@ const KANBAN_TEXT = {
     field_reserved: 'Un campo no puede llamarse {name}.', field_duplicate: 'Hay dos campos llamados {name}.',
     field_needs_values: 'La lista {name} necesita al menos un valor.', needs_column: 'El tablero necesita al menos una columna.',
     settings_conflict: '_board.md cambió mientras editabas. No se guardó nada, y tus cambios siguen acá.',
+    view_note: 'Ver', edit_note: 'Editar', empty_note: 'Esta nota no tiene texto.',
     open_full: 'Abrir nota completa', close: 'Cerrar', save: 'Guardar', status: 'Status', tags: 'Tags (separados por coma)', body: 'Texto de la nota',
     unsaved: '¿Descartar los cambios sin guardar?', save_error: 'No se pudo guardar la nota', open_error: 'No se pudo abrir la nota',
     edit_conflict: 'La nota cambió mientras editabas. No se guardó nada, y tu texto sigue acá para que lo copies.',
@@ -1328,6 +1339,33 @@ function kanbanBoardBlock(columns, fields) {
   return lines.join('\n');
 }
 
+// A smaller version of the app's preview. Code stays out of the wikilink step, and the
+// sanitized output is what the panel shows. Links open a new tab, so the board stays.
+function kanbanRenderMarkdown(body) {
+  const code = [];
+  const protect = match => {
+    code.push(match);
+    return '\x00CODE' + (code.length - 1) + '\x00';
+  };
+  const source = body
+    .replace(/```[\s\S]*?```/g, protect)
+    .replace(/`[^`]+`/g, protect)
+    .replace(/\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]+))?\]\]/g, (match, target, label) => {
+      const url = '/' + target.trim().replace(/\.md$/, '').split('/').map(encodeURIComponent).join('/');
+      const text = (label || target.trim().split('/').pop()).replace(/[\[\]]/g, '');
+      return '[' + text + '](' + url + ')';
+    })
+    .replace(/\x00CODE(\d+)\x00/g, (match, index) => code[index]);
+
+  const holder = document.createElement('div');
+  holder.innerHTML = DOMPurify.sanitize(marked.parse(source));
+  holder.querySelectorAll('a').forEach(link => {
+    link.target = '_blank';
+    link.rel = 'noopener';
+  });
+  return holder.innerHTML;
+}
+
 function kanbanBoard() {
   const locale = kanbanLocale();
   const text = locale.toLowerCase().startsWith('es') ? KANBAN_TEXT.es : KANBAN_TEXT.en;
@@ -1349,7 +1387,7 @@ function kanbanBoard() {
     newColumn: null,
     rowCount: 0,
     settings: { loading: false, saving: false, invalid: false, conflict: false, error: '', hasFile: false, hasComments: false, columns: [], fields: [], content: '', hash: null, original: '' },
-    edit: { title: '', url: '', raw: false, loading: false, saving: false, conflict: false, error: '', status: '', tagsText: '', fields: {}, body: '', original: { fields: {} } },
+    edit: { mode: 'view', html: '', title: '', url: '', raw: false, loading: false, saving: false, conflict: false, error: '', status: '', tagsText: '', fields: {}, body: '', original: { fields: {} } },
 
     init() {
       document.documentElement.lang = text === KANBAN_TEXT.es ? 'es' : 'en';
@@ -1672,7 +1710,7 @@ function kanbanBoard() {
     },
 
     async openEditor(card) {
-      this.edit = { ...this.edit, title: card.title, url: this.noteUrl(card), loading: true, conflict: false, error: '', body: '' };
+      this.edit = { ...this.edit, mode: 'view', title: card.title, url: this.noteUrl(card), loading: true, conflict: false, error: '', body: '' };
       this.$refs.editor.showModal();
       this.$refs.editor.focus();
       try {
@@ -1715,8 +1753,26 @@ function kanbanBoard() {
         conflict: false,
         error: '',
         card,
+        // Broken frontmatter has to be fixed in the source, and the markdown libraries
+        // could be missing on a broken install.
+        mode: raw || typeof marked === 'undefined' ? 'edit' : this.edit.mode,
+        html: raw || typeof marked === 'undefined' || this.edit.mode !== 'view' ? '' : kanbanRenderMarkdown(body),
         original: JSON.parse(JSON.stringify(form)),
       };
+    },
+
+    canRender() {
+      return !this.edit.raw && typeof marked !== 'undefined';
+    },
+
+    // Switching saves, so the panel never shows a view that differs from the note. If the
+    // save fails, the panel stays where it is, with the text and the error.
+    async setEditorMode(mode) {
+      if (mode === this.edit.mode || this.edit.saving) return;
+      if (this.editorDirty() && !(await this.saveEditor(true))) return;
+      if (mode === 'view') this.edit.html = kanbanRenderMarkdown(this.edit.body);
+      this.edit.mode = mode;
+      if (mode === 'edit') this.$nextTick(() => this.$refs.editorBody?.focus());
     },
 
     editorForm() {
@@ -1775,23 +1831,24 @@ function kanbanBoard() {
       return sameTags ? content : kanbanSetTags(content, tags);
     },
 
-    async saveEditor() {
-      if (this.edit.loading || this.edit.saving || this.edit.conflict) return;
+    // Returns whether the note on disk now matches the form. With keepOpen, the panel
+    // stays and the saved note becomes the new starting point.
+    async saveEditor(keepOpen = false) {
+      if (this.edit.loading || this.edit.saving || this.edit.conflict) return false;
       this.edit.error = '';
       const original = kanbanParseTags(this.edit.original.tagsText || '');
       const badTag = kanbanParseTags(this.edit.tagsText || '').find(tag => !original.includes(tag) && !kanbanValidTag(tag));
       if (badTag && !this.edit.raw) {
         this.edit.error = text.tag_invalid.replace('{name}', badTag);
-        return;
+        return false;
       }
       const content = this.editedContent();
       if (content === this.edit.content) {
-        this.$refs.editor.close();
-        return;
+        if (!keepOpen) this.$refs.editor.close();
+        return true;
       }
 
       this.edit.saving = true;
-      this.edit.error = '';
       try {
         const response = await fetch(this.noteApiUrl(this.edit.path), {
           method: 'POST',
@@ -1800,18 +1857,33 @@ function kanbanBoard() {
         });
         if (response.status === 401) {
           location.href = '/login';
-          return;
+          return false;
         }
         if (response.status === 409) {
           this.edit.conflict = true;
-          return;
+          return false;
         }
         if (!response.ok) throw new Error('HTTP ' + response.status);
-        this.$refs.editor.close();
+        if (keepOpen) {
+          const saved = await response.json();
+          const { status, tagsText, fields, body } = this.edit;
+          this.edit.hash = saved.hash;
+          this.edit.content = content;
+          this.edit.head = this.edit.raw ? '' : kanbanSplitNote(content).head;
+          this.edit.original = JSON.parse(JSON.stringify({ status, tagsText, fields, body }));
+        } else {
+          this.$refs.editor.close();
+        }
         await this.load();
+        if (keepOpen) {
+          const card = this.board.cards.find(c => c.path === this.edit.path);
+          if (card) this.edit.title = card.title;
+        }
+        return true;
       } catch (e) {
         console.error('Failed to save the note:', e);
         this.edit.error = text.save_error;
+        return false;
       } finally {
         this.edit.saving = false;
       }
@@ -2027,6 +2099,9 @@ function kanbanBoard() {
   };
 }
 </script>
+<link rel="stylesheet" href="/static/markdown-preview.css">
+<script src="/static/vendor/marked/marked.min.js"></script>
+<script src="/static/vendor/dompurify/purify.min.js"></script>
 <script defer src="/static/vendor/alpinejs/cdn.min.js"></script>
 </head>
 <body x-data="kanbanBoard()">
@@ -2210,7 +2285,17 @@ function kanbanBoard() {
               <input type="text" x-model="edit.tagsText">
             </label>
           </div>
-          <textarea class="editor-body" x-model="edit.body" :aria-label="text.body"></textarea>
+          <template x-if="canRender()">
+            <div class="editor-tabs">
+              <button class="editor-tab" type="button" :aria-pressed="edit.mode === 'view'" @click="setEditorMode('view')" x-text="text.view_note"></button>
+              <button class="editor-tab" type="button" :aria-pressed="edit.mode === 'edit'" @click="setEditorMode('edit')" x-text="text.edit_note"></button>
+            </div>
+          </template>
+          <div class="editor-view markdown-preview" x-show="edit.mode === 'view'">
+            <p class="editor-empty" x-show="!edit.body.trim()" x-text="text.empty_note"></p>
+            <div x-html="edit.html"></div>
+          </div>
+          <textarea class="editor-body" x-ref="editorBody" x-show="edit.mode === 'edit'" x-model="edit.body" :aria-label="text.body"></textarea>
           <p class="editor-message" x-show="edit.conflict" x-text="text.edit_conflict"></p>
           <p class="editor-message" x-show="edit.error" x-text="edit.error"></p>
           <div class="form-actions">
