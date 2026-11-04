@@ -512,9 +512,8 @@ dialog.editor h2 { flex: 1; min-width: 0; margin: 4px 0 0; overflow-wrap: anywhe
 .move-next { display: none; }
 .toast { position: fixed; left: 50%; bottom: 20px; z-index: 10; transform: translateX(-50%); max-width: calc(100vw - 32px); padding: 8px 14px; border: 1px solid var(--border-primary); border-radius: 8px; background: var(--bg-secondary); color: var(--text-primary); box-shadow: var(--shadow-md); }
 @media (hover: hover) and (min-width: 641px) {
-  /* Out of the way until needed, and still reachable with the keyboard. */
-  .move-select { opacity: 0; }
-  .card:hover .move-select, .move-select:focus { opacity: 1; }
+  /* A mouse drags the card. The keyboard opens the title and changes the status there. */
+  .card-foot { display: none; }
 }
 
 .state { margin: auto; padding: 32px 20px; color: var(--text-secondary); text-align: center; }
@@ -831,7 +830,7 @@ function kanbanBoard() {
     newColumn: null,
     rowCount: 0,
     settings: { loading: false, saving: false, invalid: false, conflict: false, error: '', hasFile: false, hasComments: false, columns: [], fields: [], content: '', hash: null, original: '' },
-    edit: { mode: 'preview', html: '', justSaved: false, title: '', url: '', raw: false, loading: false, saving: false, conflict: false, error: '', status: '', tagsText: '', fields: {}, body: '', original: { fields: {} } },
+    edit: { mode: 'preview', html: '', justSaved: false, fileName: '', title: '', url: '', raw: false, loading: false, saving: false, conflict: false, error: '', status: '', tagsText: '', fields: {}, body: '', original: { fields: {} } },
 
     init() {
       document.documentElement.lang = text === KANBAN_TEXT.es ? 'es' : 'en';
@@ -1143,7 +1142,7 @@ function kanbanBoard() {
     },
 
     async openEditor(card) {
-      this.edit = { ...this.edit, mode: 'preview', justSaved: false, title: card.title, url: this.noteUrl(card), loading: true, conflict: false, error: '', body: '' };
+      this.edit = { ...this.edit, mode: 'preview', justSaved: false, fileName: card.name, title: card.title, url: this.noteUrl(card), loading: true, conflict: false, error: '', body: '' };
       this.$refs.editor.showModal();
       this.$refs.editor.focus();
       try {
@@ -1655,7 +1654,6 @@ function kanbanBoard() {
                     </p>
                   </template>
                   <div class="card-foot">
-                    <span class="file" x-text="card.name"></span>
                     <div class="card-actions" x-show="canMove(card)">
                       <select class="move-select" :aria-label="text.move_to" @change="move(card, $event.target.value); $event.target.value = ''">
                         <option value="" selected disabled x-text="text.move_to"></option>
@@ -1683,7 +1681,10 @@ function kanbanBoard() {
   <dialog class="editor" x-ref="editor" tabindex="-1" @cancel.prevent="closeEditor()" @click.self="closeEditor()">
     <form class="editor-form" @submit.prevent="saveAndConfirm()">
       <div class="editor-head">
-        <h2 x-text="edit.title"></h2>
+        <h2>
+          <span x-text="edit.title"></span>
+          <span class="file" x-text="' - ' + edit.fileName"></span>
+        </h2>
         <a class="editor-link" :href="edit.url" target="_blank" rel="noopener">
           <span x-text="text.open_full"></span>
           <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5m0-5l-8 8M10 5H6a1 1 0 00-1 1v12a1 1 0 001 1h12a1 1 0 001-1v-4"/></svg>
