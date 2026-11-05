@@ -204,6 +204,8 @@ The MCP server provides these tools to AI assistants:
 | `move_note` | Move or rename a note |
 | `delete_note` | Delete a note |
 | `create_folder` | Create a new folder |
+| `move_folder` | Move or rename a folder with everything inside it |
+| `delete_folder` | Delete a folder (only an empty one, unless `recursive` is true) |
 
 ### Templates
 

@@ -54,6 +54,7 @@ from .utils import (
     move_folder,
     rename_folder,
     delete_folder,
+    folder_is_empty,
     save_uploaded_image,
     _scan_cache_invalidate,
     validate_path_security,
@@ -1307,13 +1308,17 @@ async def rename_folder_endpoint(request: Request, data: dict):
 
 @api_router.delete("/folders/{folder_path:path}", tags=["Folders"])
 @limiter.limit("20/minute")
-async def delete_folder_endpoint(request: Request, folder_path: str):
-    """Delete a folder and all its contents"""
+async def delete_folder_endpoint(request: Request, folder_path: str, require_empty: bool = False):
+    """Delete a folder and all its contents. With require_empty, only delete an empty folder."""
     try:
         if not folder_path:
             raise HTTPException(status_code=400, detail="Folder path required")
+
+        notes_dir = config['storage']['notes_dir']
+        if require_empty and (Path(notes_dir) / folder_path).is_dir() and not folder_is_empty(notes_dir, folder_path):
+            raise HTTPException(status_code=409, detail=f"Folder is not empty: {folder_path}")
         
-        success = delete_folder(config['storage']['notes_dir'], folder_path)
+        success = delete_folder(notes_dir, folder_path)
         
         if not success:
             raise HTTPException(status_code=500, detail="Failed to delete folder")

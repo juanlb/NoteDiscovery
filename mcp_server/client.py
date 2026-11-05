@@ -373,6 +373,38 @@ class NoteDiscoveryClient:
         """
         return self._request("POST", "/api/folders", data={"path": path})
     
+    def move_folder(self, old_path: str, new_path: str) -> APIResponse:
+        """
+        Move or rename a folder with everything inside it.
+
+        Args:
+            old_path: Current folder path
+            new_path: New folder path
+
+        Returns:
+            APIResponse with move result
+        """
+        return self._request(
+            "POST",
+            "/api/folders/move",
+            data={"oldPath": old_path, "newPath": new_path}
+        )
+
+    def delete_folder(self, path: str, recursive: bool = False) -> APIResponse:
+        """
+        Delete a folder.
+
+        Args:
+            path: Folder path
+            recursive: Also delete everything inside it (default: only an empty folder)
+
+        Returns:
+            APIResponse with deletion result
+        """
+        encoded_path = urllib.parse.quote(path, safe="")
+        params = None if recursive else {"require_empty": "true"}
+        return self._request("DELETE", f"/api/folders/{encoded_path}", params=params)
+
     # =========================================================================
     # Graph API
     # =========================================================================

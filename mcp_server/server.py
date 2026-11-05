@@ -13,6 +13,7 @@ import json
 import re
 import sys
 import traceback
+from pathlib import PurePosixPath
 from typing import Any, Optional
 
 from . import __version__
@@ -499,6 +500,46 @@ class MCPServer:
         
         return f"📁 Folder created: {path}"
     
+    def _validate_folder_path(self, path: str) -> tuple[bool, str]:
+        """Validate a path that names a folder other than the vault root."""
+        is_valid, error = self._validate_path(path)
+        if is_valid and not PurePosixPath(path).parts:
+            return False, "path cannot be the vault root"
+        return is_valid, error
+
+    def _tool_move_folder(self, args: dict) -> str:
+        """Move or rename a folder."""
+        old_path = args.get("old_path", "")
+        new_path = args.get("new_path", "")
+
+        for path in (old_path, new_path):
+            is_valid, error = self._validate_folder_path(path)
+            if not is_valid:
+                return f"Error: {error}"
+
+        response = self.client.move_folder(old_path, new_path)
+
+        if not response.success:
+            return f"Failed to move folder: {response.error}"
+
+        return f"Moved folder {old_path} to {new_path}"
+
+    def _tool_delete_folder(self, args: dict) -> str:
+        """Delete a folder."""
+        path = args.get("path", "")
+        recursive = args.get("recursive", False)
+
+        is_valid, error = self._validate_folder_path(path)
+        if not is_valid:
+            return f"Error: {error}"
+
+        response = self.client.delete_folder(path, recursive=recursive)
+
+        if not response.success:
+            return f"Failed to delete folder: {response.error}"
+
+        return f"Deleted folder {path}"
+
     def _tool_list_templates(self, args: dict) -> str:
         """List templates."""
         response = self.client.list_templates()

@@ -548,6 +548,14 @@ def delete_folder(notes_dir: str, folder_path: str) -> bool:
         return False
 
 
+def folder_is_empty(notes_dir: str, folder_path: str) -> bool:
+    """True when the folder holds nothing at all, hidden files included."""
+    full_path = Path(notes_dir) / folder_path
+    if not validate_path_security(notes_dir, full_path) or not full_path.is_dir():
+        return False
+    return not any(full_path.iterdir())
+
+
 def _drop_path_caches(full_path: Path) -> None:
     """Evict the per-file mtime caches for a single note."""
     key = str(full_path)

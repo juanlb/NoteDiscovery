@@ -381,7 +381,10 @@ Content-Type: application/json
 ```http
 DELETE /api/folders/{folder_path}
 ```
-Deletes a folder and all its contents.
+Deletes a folder and all its contents. The vault root cannot be deleted.
+
+**Query Parameters:**
+- `require_empty` (optional): when `true`, returns `409` and deletes nothing if the folder is not empty. Defaults to `false`.
 
 **Example:**
 ```bash
