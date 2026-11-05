@@ -382,11 +382,10 @@ class MCPServer:
         if parent and parent not in folders:
             return f"Folder not found: {parent}"
 
-        note_counts = Counter(
-            note.get("folder", "")
-            for note in data.get("notes", [])
-            if note.get("type") == "note"
-        )
+        # _board.md configures a Kanban board. It is not one of the folder's notes.
+        notes = [note for note in data.get("notes", []) if note.get("type") == "note"]
+        boards = {note.get("folder", "") for note in notes if note.get("name") == "_board"}
+        note_counts = Counter(note.get("folder", "") for note in notes if note.get("name") != "_board")
         subfolder_counts = Counter(folder.rpartition("/")[0] for folder in folders)
 
         prefix = f"{parent}/" if parent else ""
@@ -404,6 +403,7 @@ class MCPServer:
             output.append(
                 f"📁 {folder}/ "
                 f"(notes: {note_counts[folder]}, subfolders: {subfolder_counts[folder]})"
+                + (" [board]" if folder in boards else "")
             )
 
         return "\n".join(output)

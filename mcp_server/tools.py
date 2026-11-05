@@ -74,7 +74,7 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "list_folders",
-        "description": "List folders in the knowledge base, including empty ones, with the number of notes and subfolders directly inside each one.",
+        "description": "List folders in the knowledge base, including empty ones, with the number of notes and subfolders directly inside each one, and whether it is a Kanban board.",
         "inputSchema": {
             "type": "object",
             "properties": {
