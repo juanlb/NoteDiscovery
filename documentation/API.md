@@ -25,6 +25,11 @@ When `limit` is provided, the response includes pagination metadata.
 | `folder` | string | - | Only return notes under this folder |
 | `recursive` | boolean | true | With `folder`, also include subfolders |
 
+**Optional Frontmatter:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `include_frontmatter` | boolean | false | Add a `frontmatter` object to each note. `GET /api/tags/{tag_name}` and `GET /api/tags-match` also accept it |
+
 **Examples:**
 ```bash
 # Get all notes (default)

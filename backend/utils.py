@@ -5,6 +5,7 @@ Heavy work (backlinks, graph, full-text search, tag aggregation) is delegated
 to the in-memory index in note_index.py.
 """
 
+import json
 import logging
 import os
 import re
@@ -20,6 +21,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any, TypeVar, Callable
 from datetime import datetime, timezone
+
+import yaml
 
 from . import note_index
 from .note_index import NoteRecord, extract_links_from_content
@@ -315,6 +318,9 @@ def ensure_directories(config: dict):
     
     for dir_path in dirs:
         Path(dir_path).mkdir(parents=True, exist_ok=True)
+
+
+FRONTMATTER_MAX_LINES = 500
 
 
 def is_in_folder(path: str, folder: str, recursive: bool = True) -> bool:
@@ -1139,6 +1145,36 @@ def parse_tags(content: str) -> List[str]:
     except Exception as e:
         logger.error("Error parsing tags: %s", e)
         return []
+
+
+def read_frontmatter(notes_dir: str, note_path: str) -> Dict[str, Any]:
+    """Parsed YAML frontmatter of a note. Empty when it has none or it is invalid."""
+    full_path = Path(notes_dir) / note_path
+    if not validate_path_security(notes_dir, full_path):
+        return {}
+
+    lines: List[str] = []
+    try:
+        with open(full_path, 'r', encoding='utf-8') as f:
+            if f.readline().strip() != '---':
+                return {}
+            # Only the frontmatter is read, not the body of the note.
+            for line in f:
+                if line.strip() == '---':
+                    break
+                lines.append(line)
+                if len(lines) >= FRONTMATTER_MAX_LINES:
+                    return {}
+            else:
+                return {}
+        values = yaml.safe_load(''.join(lines))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return {}
+
+    if not isinstance(values, dict):
+        return {}
+    # YAML can produce dates and other values that JSON cannot carry.
+    return json.loads(json.dumps(values, default=str))
 
 
 def get_all_tags(notes_dir: str) -> Dict[str, int]:

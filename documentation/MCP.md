@@ -235,6 +235,8 @@ Some tools support optional pagination parameters for large vaults:
 - `limit` - Maximum items to return (omit for all)
 - `offset` - Number of items to skip (for pagination)
 
+`list_notes` and `get_notes_by_tag` accept `include_frontmatter`, which adds each note's frontmatter fields to the result.
+
 `search_notes` and `list_notes` also accept `folder`, to return only notes under that folder, and `recursive` (default: true), to include or skip its subfolders. Pagination applies after the folder filter.
 
 **Example prompts:**

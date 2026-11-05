@@ -55,6 +55,7 @@ from .utils import (
     rename_folder,
     delete_folder,
     is_in_folder,
+    read_frontmatter,
     save_uploaded_image,
     _scan_cache_invalidate,
     validate_path_security,
@@ -1348,6 +1349,16 @@ async def list_tags():
         raise HTTPException(status_code=500, detail=safe_error_message(e, "Failed to load tags"))
 
 
+def _with_frontmatter(notes: List[dict]) -> List[dict]:
+    """Copies of the notes with their frontmatter. Media files get none."""
+    notes_dir = config['storage']['notes_dir']
+    return [
+        {**note, "frontmatter": read_frontmatter(notes_dir, note['path'])}
+        if note['path'].lower().endswith('.md') else note
+        for note in notes
+    ]
+
+
 @api_router.get("/tags-match", tags=["Tags"])
 async def get_notes_by_several_tags(
     tags: List[str] = Query(default=[]),
@@ -1355,7 +1366,8 @@ async def get_notes_by_several_tags(
     limit: Optional[int] = None,
     offset: int = 0,
     folder: Optional[str] = None,
-    recursive: bool = True
+    recursive: bool = True,
+    include_frontmatter: bool = False
 ):
     """
     Get the notes that have several tags, with optional folder filter and pagination.
@@ -1367,6 +1379,7 @@ async def get_notes_by_several_tags(
         offset: Number of notes to skip (default: 0)
         folder: Only return notes under this folder (optional)
         recursive: With folder, also include subfolders (default: true)
+        include_frontmatter: Add each note's parsed frontmatter (default: false)
 
     Examples:
         GET /api/tags-match?tags=docker&tags=linux            -> Notes with both tags
@@ -1393,7 +1406,7 @@ async def get_notes_by_several_tags(
             "tags": tags,
             "match": match,
             "count": paginated.total,
-            "notes": paginated.items
+            "notes": _with_frontmatter(paginated.items) if include_frontmatter else paginated.items
         }
 
         if limit is not None:
@@ -1408,7 +1421,8 @@ async def get_notes_by_several_tags(
 async def get_notes_by_tag_endpoint(
     tag_name: str,
     limit: Optional[int] = None,
-    offset: int = 0
+    offset: int = 0,
+    include_frontmatter: bool = False
 ):
     """
     Get all notes that have a specific tag with optional pagination.
@@ -1417,6 +1431,7 @@ async def get_notes_by_tag_endpoint(
         tag_name: The tag to filter by (case-insensitive)
         limit: Maximum number of notes to return (optional, no default limit)
         offset: Number of notes to skip (default: 0)
+        include_frontmatter: Add each note's parsed frontmatter (default: false)
 
     Returns:
         List of notes matching the tag
@@ -1439,7 +1454,7 @@ async def get_notes_by_tag_endpoint(
         response = {
             "tag": tag_name,
             "count": paginated.total,
-            "notes": paginated.items
+            "notes": _with_frontmatter(paginated.items) if include_frontmatter else paginated.items
         }
         
         # Include pagination metadata only when limit is specified
@@ -1579,7 +1594,8 @@ async def list_notes(
     limit: Optional[int] = None,
     offset: int = 0,
     folder: Optional[str] = None,
-    recursive: bool = True
+    recursive: bool = True,
+    include_frontmatter: bool = False
 ):
     """
     List all notes with metadata.
@@ -1593,6 +1609,7 @@ async def list_notes(
         offset: Number of notes to skip (default: 0)
         folder: Only return notes under this folder (optional)
         recursive: With folder, also include subfolders (default: true)
+        include_frontmatter: Add each note's parsed frontmatter (default: false)
     
     Examples:
         GET /api/notes              -> All notes
@@ -1617,7 +1634,7 @@ async def list_notes(
         )
         
         response = {
-            "notes": result.items,
+            "notes": _with_frontmatter(result.items) if include_frontmatter else result.items,
             "folders": folders
         }
         

@@ -56,6 +56,10 @@ TOOLS: list[dict[str, Any]] = [
                     "type": "boolean",
                     "description": "With folder, also include subfolders. Defaults to true."
                 },
+                "include_frontmatter": {
+                    "type": "boolean",
+                    "description": "Add each note's frontmatter fields, so there is no need to open each note. Defaults to false."
+                },
                 "limit": {
                     "type": "integer",
                     "description": "Maximum number of notes to return. Useful for large vaults. If not specified, returns all notes."
@@ -104,6 +108,10 @@ TOOLS: list[dict[str, Any]] = [
                 "tag": {
                     "type": "string",
                     "description": "Tag name (without the # symbol). Use tags for several tags."
+                },
+                "include_frontmatter": {
+                    "type": "boolean",
+                    "description": "Add each note's frontmatter fields, so there is no need to open each note. Defaults to false."
                 },
                 "tags": {
                     "type": "array",

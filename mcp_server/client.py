@@ -144,7 +144,8 @@ class NoteDiscoveryClient:
         limit: int | None = None,
         offset: int = 0,
         folder: str | None = None,
-        recursive: bool = True
+        recursive: bool = True,
+        include_frontmatter: bool = False
     ) -> APIResponse:
         """
         List all notes with metadata.
@@ -154,6 +155,7 @@ class NoteDiscoveryClient:
             offset: Number of notes to skip (default: 0)
             folder: Only return notes under this folder
             recursive: With folder, also include subfolders (default: True)
+            include_frontmatter: Add each note's parsed frontmatter
         
         Returns:
             APIResponse with notes and folders data
@@ -165,6 +167,8 @@ class NoteDiscoveryClient:
         if folder:
             params["folder"] = folder
             params["recursive"] = "true" if recursive else "false"
+        if include_frontmatter:
+            params["include_frontmatter"] = "true"
         return self._request("GET", "/api/notes", params=params if params else None)
     
     def get_note(self, path: str) -> APIResponse:
@@ -378,7 +382,8 @@ class NoteDiscoveryClient:
         limit: int | None = None,
         offset: int = 0,
         folder: str | None = None,
-        recursive: bool = True
+        recursive: bool = True,
+        include_frontmatter: bool = False
     ) -> APIResponse:
         """
         Get notes that have several tags.
@@ -390,6 +395,7 @@ class NoteDiscoveryClient:
             offset: Number of notes to skip (default: 0)
             folder: Only return notes under this folder
             recursive: With folder, also include subfolders (default: True)
+            include_frontmatter: Add each note's parsed frontmatter
 
         Returns:
             APIResponse with matching notes
@@ -401,6 +407,8 @@ class NoteDiscoveryClient:
         if folder:
             params["folder"] = folder
             params["recursive"] = "true" if recursive else "false"
+        if include_frontmatter:
+            params["include_frontmatter"] = "true"
         return self._request("GET", "/api/tags-match", params=params)
 
     # =========================================================================

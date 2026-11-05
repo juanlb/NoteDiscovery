@@ -280,7 +280,13 @@ class MCPServer:
                 return f"Error: {error.replace('path', 'folder')}"
 
         # Use server-side pagination if limit is specified
-        response = self.client.list_notes(limit=limit, offset=offset, folder=folder, recursive=recursive)
+        response = self.client.list_notes(
+            limit=limit,
+            offset=offset,
+            folder=folder,
+            recursive=recursive,
+            include_frontmatter=args.get("include_frontmatter", False),
+        )
         
         if not response.success:
             return f"Failed to list notes: {response.error}"
@@ -312,6 +318,8 @@ class MCPServer:
                 name = note.get("name", "unknown")
                 modified = note.get("modified", "")
                 output.append(f"   📝 {name} (modified: {modified})")
+                if "frontmatter" in note:
+                    output.append(f"      frontmatter: {json.dumps(note['frontmatter'], ensure_ascii=False)}")
             output.append("")
         
         # Add pagination hint if there are more results
@@ -388,7 +396,13 @@ class MCPServer:
 
         # Use server-side pagination if limit is specified
         response = self.client.get_notes_by_tags(
-            tags, match=match, limit=limit, offset=offset, folder=folder, recursive=recursive
+            tags,
+            match=match,
+            limit=limit,
+            offset=offset,
+            folder=folder,
+            recursive=recursive,
+            include_frontmatter=args.get("include_frontmatter", False),
         )
 
         if not response.success:
@@ -414,6 +428,8 @@ class MCPServer:
         for note in notes:
             path = note.get("path", "unknown")
             output.append(f"  📝 {path}")
+            if "frontmatter" in note:
+                output.append(f"     frontmatter: {json.dumps(note['frontmatter'], ensure_ascii=False)}")
 
         # Add pagination hint if there are more results
         if pagination and pagination.get("has_more"):
