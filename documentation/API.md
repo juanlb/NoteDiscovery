@@ -248,9 +248,12 @@ Content-Type: application/json
 
 {
   "oldPath": "note.md",
-  "newPath": "folder/note.md"
+  "newPath": "folder/note.md",
+  "updateLinks": true
 }
 ```
+
+`updateLinks` is optional and defaults to `false`. When `true`, links to the moved note in other notes are rewritten, and the response adds `updatedLinksIn` and `linkUpdateFailedIn`, each a list of note paths.
 
 ## 🎬 Media
 
@@ -381,7 +384,10 @@ Content-Type: application/json
 ```http
 DELETE /api/folders/{folder_path}
 ```
-Deletes a folder and all its contents.
+Deletes a folder and all its contents. The vault root cannot be deleted.
+
+**Query Parameters:**
+- `require_empty` (optional): when `true`, returns `409` and deletes nothing if the folder is not empty. Defaults to `false`.
 
 **Example:**
 ```bash
@@ -395,9 +401,12 @@ Content-Type: application/json
 
 {
   "oldPath": "OldFolder",
-  "newPath": "NewFolder"
+  "newPath": "NewFolder",
+  "updateLinks": true
 }
 ```
+
+`updateLinks` works as in [Move Note](#-notes): it is optional, defaults to `false`, and also updates links inside the moved folder.
 
 ### Rename Folder
 ```http
