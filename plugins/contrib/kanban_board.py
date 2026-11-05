@@ -498,6 +498,7 @@ MCP_TOOLS = [
             "properties": {
                 "folder": {"type": "string", "description": "Folder path. An empty string is the vault root."},
                 "status": {"type": "string", "description": "Only return the cards shown in this column."},
+                "tags": {"type": "array", "items": {"type": "string"}, "description": "Only return the cards that have all of these tags."},
             },
             "required": ["folder"],
         },
@@ -688,6 +689,10 @@ class Plugin:
         if status is not None:
             _clean_status(status, data)
             data["cards"] = [card for card in data["cards"] if card["column"] == status]
+        tags = args.get("tags")
+        if tags:
+            wanted = set(_clean_tags(tags))
+            data["cards"] = [card for card in data["cards"] if wanted <= set(card["tags"])]
         return data
 
     def _card_target(self, rel_path) -> tuple[Path, Path, str]:
