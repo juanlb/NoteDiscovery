@@ -477,11 +477,18 @@ def move_note(notes_dir: str, old_path: str, new_path: str) -> tuple[bool, str]:
     return True, ""
 
 
+def _is_vault_root(notes_dir: str, path: Path) -> bool:
+    """True when `path` is the notes directory itself, however it was spelled."""
+    return path.resolve() == Path(notes_dir).resolve()
+
+
 def move_folder(notes_dir: str, old_path: str, new_path: str) -> tuple[bool, str]:
     """Move a folder. Returns (success, error_message)."""
     old_full_path = Path(notes_dir) / old_path
     new_full_path = Path(notes_dir) / new_path
 
+    if _is_vault_root(notes_dir, old_full_path):
+        return False, "Cannot move the vault root"
     if not validate_path_security(notes_dir, old_full_path):
         return False, "Invalid source path"
     if not validate_path_security(notes_dir, new_full_path):
@@ -519,6 +526,9 @@ def delete_folder(notes_dir: str, folder_path: str) -> bool:
 
         if not validate_path_security(notes_dir, full_path):
             logger.warning("Security: Path is outside notes directory: %s", full_path)
+            return False
+        if _is_vault_root(notes_dir, full_path):
+            logger.warning("Refusing to delete the vault root: %s", folder_path)
             return False
         if not full_path.exists():
             logger.warning("Folder does not exist: %s", full_path)
