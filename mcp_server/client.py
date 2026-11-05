@@ -245,7 +245,7 @@ class NoteDiscoveryClient:
             data={"path": path, "old_str": old_str, "new_str": new_str}
         )
     
-    def move_note(self, old_path: str, new_path: str) -> APIResponse:
+    def move_note(self, old_path: str, new_path: str, update_links: bool = True) -> APIResponse:
         """
         Move or rename a note.
         
@@ -259,7 +259,7 @@ class NoteDiscoveryClient:
         return self._request(
             "POST",
             "/api/notes/move",
-            data={"oldPath": old_path, "newPath": new_path}
+            data={"oldPath": old_path, "newPath": new_path, "updateLinks": update_links}
         )
     
     def create_note_from_template(
@@ -373,13 +373,14 @@ class NoteDiscoveryClient:
         """
         return self._request("POST", "/api/folders", data={"path": path})
     
-    def move_folder(self, old_path: str, new_path: str) -> APIResponse:
+    def move_folder(self, old_path: str, new_path: str, update_links: bool = True) -> APIResponse:
         """
         Move or rename a folder with everything inside it.
 
         Args:
             old_path: Current folder path
             new_path: New folder path
+            update_links: Rewrite links in other notes that point into the folder
 
         Returns:
             APIResponse with move result
@@ -387,7 +388,7 @@ class NoteDiscoveryClient:
         return self._request(
             "POST",
             "/api/folders/move",
-            data={"oldPath": old_path, "newPath": new_path}
+            data={"oldPath": old_path, "newPath": new_path, "updateLinks": update_links}
         )
 
     def delete_folder(self, path: str, recursive: bool = False) -> APIResponse:

@@ -180,7 +180,7 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "move_folder",
-        "description": "Move or rename a folder with all its notes and subfolders. Fails if a folder already exists at the new path.",
+        "description": "Move or rename a folder with all its notes and subfolders, and rewrite links into it in other notes. Fails if a folder already exists at the new path.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -191,6 +191,10 @@ TOOLS: list[dict[str, Any]] = [
                 "new_path": {
                     "type": "string",
                     "description": "New path for the folder"
+                },
+                "update_links": {
+                    "type": "boolean",
+                    "description": "Rewrite links in other notes so they keep working. Defaults to true."
                 }
             },
             "required": ["old_path", "new_path"]
@@ -260,7 +264,7 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "move_note",
-        "description": "Move or rename a note to a different path. Use this to reorganize notes or rename them.",
+        "description": "Move or rename a note to a different path, and rewrite links to it in other notes. Use this to reorganize notes or rename them.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -271,6 +275,10 @@ TOOLS: list[dict[str, Any]] = [
                 "new_path": {
                     "type": "string",
                     "description": "New path for the note (can be in a different folder)"
+                },
+                "update_links": {
+                    "type": "boolean",
+                    "description": "Rewrite links in other notes so they keep working. Defaults to true."
                 }
             },
             "required": ["old_path", "new_path"]

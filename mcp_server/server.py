@@ -500,6 +500,20 @@ class MCPServer:
         
         return f"📁 Folder created: {path}"
     
+    def _describe_move(self, moved: str, response: APIResponse) -> str:
+        """Describe a finished move and the links it changed."""
+        data = response.data or {}
+        output = [moved]
+        updated = data.get("updatedLinksIn", [])
+        failed = data.get("linkUpdateFailedIn", [])
+        if updated:
+            output.append(f"Updated links in {len(updated)} note(s):")
+            output.extend(f"  📝 {path}" for path in updated)
+        if failed:
+            output.append(f"Could not update links in {len(failed)} note(s):")
+            output.extend(f"  ⚠️ {path}" for path in failed)
+        return "\n".join(output)
+
     def _validate_folder_path(self, path: str) -> tuple[bool, str]:
         """Validate a path that names a folder other than the vault root."""
         is_valid, error = self._validate_path(path)
@@ -517,12 +531,12 @@ class MCPServer:
             if not is_valid:
                 return f"Error: {error}"
 
-        response = self.client.move_folder(old_path, new_path)
+        response = self.client.move_folder(old_path, new_path, update_links=args.get("update_links", True))
 
         if not response.success:
             return f"Failed to move folder: {response.error}"
 
-        return f"Moved folder {old_path} to {new_path}"
+        return self._describe_move(f"Moved folder {old_path} to {new_path}", response)
 
     def _tool_delete_folder(self, args: dict) -> str:
         """Delete a folder."""
@@ -631,12 +645,12 @@ class MCPServer:
         if not is_valid:
             return f"Error: new_path - {error}"
         
-        response = self.client.move_note(old_path, new_path)
+        response = self.client.move_note(old_path, new_path, update_links=args.get("update_links", True))
         
         if not response.success:
             return f"Failed to move note: {response.error}"
         
-        return f"✅ Note moved: {old_path} → {new_path}"
+        return self._describe_move(f"✅ Note moved: {old_path} → {new_path}", response)
     
     def _tool_get_recent_notes(self, args: dict) -> str:
         """Get recently modified notes."""

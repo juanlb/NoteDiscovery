@@ -298,6 +298,9 @@ Move or rename a note to a different location.
 |-----------|------|----------|-------------|
 | `old_path` | string | Yes | Current note path |
 | `new_path` | string | Yes | New path (can include folder) |
+| `update_links` | boolean | No | Rewrite links in other notes (default: true) |
+
+The response lists the notes whose links changed. Text inside code blocks and inline code does not change. A link by note name, like `[[note]]`, stays as it is while the name still finds the note. `move_folder` works the same way.
 
 **Example prompt:** "Move draft.md to published/final-article.md"
 

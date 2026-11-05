@@ -248,9 +248,12 @@ Content-Type: application/json
 
 {
   "oldPath": "note.md",
-  "newPath": "folder/note.md"
+  "newPath": "folder/note.md",
+  "updateLinks": true
 }
 ```
+
+`updateLinks` is optional and defaults to `false`. When `true`, links to the moved note in other notes are rewritten, and the response adds `updatedLinksIn` and `linkUpdateFailedIn`, each a list of note paths.
 
 ## 🎬 Media
 
@@ -398,9 +401,12 @@ Content-Type: application/json
 
 {
   "oldPath": "OldFolder",
-  "newPath": "NewFolder"
+  "newPath": "NewFolder",
+  "updateLinks": true
 }
 ```
+
+`updateLinks` works as in [Move Note](#-notes): it is optional, defaults to `false`, and also updates links inside the moved folder.
 
 ### Rename Folder
 ```http
