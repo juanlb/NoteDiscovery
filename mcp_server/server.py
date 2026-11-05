@@ -13,6 +13,7 @@ import json
 import re
 import sys
 import traceback
+from collections import Counter
 from typing import Any, Optional
 
 from . import __version__
@@ -302,6 +303,53 @@ class MCPServer:
         # Add pagination hint if there are more results
         if pagination and pagination.get("has_more"):
             output.append(f"... more notes available (use limit and offset to paginate)")
+
+        return "\n".join(output)
+
+    def _tool_list_folders(self, args: dict) -> str:
+        """List folders, including empty ones."""
+        parent = args.get("parent", "").rstrip("/")
+        recursive = args.get("recursive", True)
+
+        if parent:
+            is_valid, error = self._validate_path(parent)
+            if not is_valid:
+                return f"Error: {error.replace('path', 'parent')}"
+
+        response = self.client.list_notes()
+
+        if not response.success:
+            return f"Failed to list folders: {response.error}"
+
+        data = response.data or {}
+        folders = data.get("folders", [])
+
+        if parent and parent not in folders:
+            return f"Folder not found: {parent}"
+
+        note_counts = Counter(
+            note.get("folder", "")
+            for note in data.get("notes", [])
+            if note.get("type") == "note"
+        )
+        subfolder_counts = Counter(folder.rpartition("/")[0] for folder in folders)
+
+        prefix = f"{parent}/" if parent else ""
+        selected = [
+            folder for folder in folders
+            if folder.startswith(prefix)
+            and (recursive or "/" not in folder[len(prefix):])
+        ]
+
+        if not selected:
+            return f"No folders found under {parent}" if parent else "No folders found"
+
+        output = [f"Found {len(selected)} folder(s):\n"]
+        for folder in selected:
+            output.append(
+                f"📁 {folder}/ "
+                f"(notes: {note_counts[folder]}, subfolders: {subfolder_counts[folder]})"
+            )
 
         return "\n".join(output)
 

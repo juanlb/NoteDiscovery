@@ -182,6 +182,7 @@ The MCP server provides these tools to AI assistants:
 |------|-------------|
 | `search_notes` | Full-text search across all notes (supports pagination) |
 | `list_notes` | List all notes with metadata (supports pagination) |
+| `list_folders` | List folders, including empty ones, with note and subfolder counts |
 | `get_note` | Read a specific note's content |
 | `get_recent_notes` | Get recently modified notes (last N days) |
 
