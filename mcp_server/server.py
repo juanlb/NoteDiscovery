@@ -214,11 +214,19 @@ class MCPServer:
         limit = args.get("limit")
         offset = args.get("offset", 0)
 
+        folder = args.get("folder")
+        recursive = args.get("recursive", True)
+
         if not query:
             return "No search term provided. Please specify a query."
 
+        if folder:
+            is_valid, error = self._validate_path(folder)
+            if not is_valid:
+                return f"Error: {error.replace('path', 'folder')}"
+
         # Use server-side pagination if limit is specified
-        response = self.client.search(query, limit=limit, offset=offset)
+        response = self.client.search(query, limit=limit, offset=offset, folder=folder, recursive=recursive)
         
         if not response.success:
             return f"Search failed: {response.error}"
@@ -263,9 +271,16 @@ class MCPServer:
         """List all notes."""
         limit = args.get("limit")
         offset = args.get("offset", 0)
+        folder = args.get("folder")
+        recursive = args.get("recursive", True)
+
+        if folder:
+            is_valid, error = self._validate_path(folder)
+            if not is_valid:
+                return f"Error: {error.replace('path', 'folder')}"
 
         # Use server-side pagination if limit is specified
-        response = self.client.list_notes(limit=limit, offset=offset)
+        response = self.client.list_notes(limit=limit, offset=offset, folder=folder, recursive=recursive)
         
         if not response.success:
             return f"Failed to list notes: {response.error}"

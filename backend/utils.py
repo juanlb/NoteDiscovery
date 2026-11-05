@@ -317,6 +317,12 @@ def ensure_directories(config: dict):
         Path(dir_path).mkdir(parents=True, exist_ok=True)
 
 
+def is_in_folder(path: str, folder: str, recursive: bool = True) -> bool:
+    """True when a vault-relative path sits under `folder`. Paths use forward slashes."""
+    parent = path.rpartition('/')[0]
+    return parent == folder or (recursive and parent.startswith(f"{folder}/"))
+
+
 def create_folder(notes_dir: str, folder_path: str) -> bool:
     """Create a new folder in the notes directory."""
     full_path = Path(notes_dir) / folder_path

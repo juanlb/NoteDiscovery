@@ -19,6 +19,12 @@ Returns all notes with their metadata and folder structure.
 
 When `limit` is provided, the response includes pagination metadata.
 
+**Optional Folder Filter:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `folder` | string | - | Only return notes under this folder |
+| `recursive` | boolean | true | With `folder`, also include subfolders |
+
 **Examples:**
 ```bash
 # Get all notes (default)
@@ -429,6 +435,12 @@ match most of a vault and cannot use the search index.
 |-----------|------|---------|-------------|
 | `limit` | integer | - | Max results to return (omit for all) |
 | `offset` | integer | 0 | Number of results to skip |
+
+**Optional Folder Filter:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `folder` | string | - | Only return results under this folder |
+| `recursive` | boolean | true | With `folder`, also include subfolders |
 
 **Examples:**
 ```bash

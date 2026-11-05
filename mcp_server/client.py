@@ -142,7 +142,9 @@ class NoteDiscoveryClient:
     def list_notes(
         self,
         limit: int | None = None,
-        offset: int = 0
+        offset: int = 0,
+        folder: str | None = None,
+        recursive: bool = True
     ) -> APIResponse:
         """
         List all notes with metadata.
@@ -150,6 +152,8 @@ class NoteDiscoveryClient:
         Args:
             limit: Maximum number of notes to return (None = no limit)
             offset: Number of notes to skip (default: 0)
+            folder: Only return notes under this folder
+            recursive: With folder, also include subfolders (default: True)
         
         Returns:
             APIResponse with notes and folders data
@@ -158,6 +162,9 @@ class NoteDiscoveryClient:
         if limit is not None:
             params["limit"] = str(limit)
             params["offset"] = str(offset)
+        if folder:
+            params["folder"] = folder
+            params["recursive"] = "true" if recursive else "false"
         return self._request("GET", "/api/notes", params=params if params else None)
     
     def get_note(self, path: str) -> APIResponse:
@@ -297,7 +304,9 @@ class NoteDiscoveryClient:
         self,
         query: str,
         limit: int | None = None,
-        offset: int = 0
+        offset: int = 0,
+        folder: str | None = None,
+        recursive: bool = True
     ) -> APIResponse:
         """
         Search notes by query.
@@ -306,6 +315,8 @@ class NoteDiscoveryClient:
             query: Search query string
             limit: Maximum number of results to return (None = no limit)
             offset: Number of results to skip (default: 0)
+            folder: Only return results under this folder
+            recursive: With folder, also include subfolders (default: True)
             
         Returns:
             APIResponse with search results
@@ -314,6 +325,9 @@ class NoteDiscoveryClient:
         if limit is not None:
             params["limit"] = str(limit)
             params["offset"] = str(offset)
+        if folder:
+            params["folder"] = folder
+            params["recursive"] = "true" if recursive else "false"
         return self._request("GET", "/api/search", params=params)
     
     # =========================================================================

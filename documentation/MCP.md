@@ -235,6 +235,8 @@ Some tools support optional pagination parameters for large vaults:
 - `limit` - Maximum items to return (omit for all)
 - `offset` - Number of items to skip (for pagination)
 
+`search_notes` and `list_notes` also accept `folder`, to return only notes under that folder, and `recursive` (default: true), to include or skip its subfolders. Pagination applies after the folder filter.
+
 **Example prompts:**
 - "Search for notes about Python, but just show me the first 5 results"
 - "Show me the next 5 Python notes" (uses offset)

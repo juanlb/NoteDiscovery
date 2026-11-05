@@ -54,6 +54,7 @@ from .utils import (
     move_folder,
     rename_folder,
     delete_folder,
+    is_in_folder,
     save_uploaded_image,
     _scan_cache_invalidate,
     validate_path_security,
@@ -1519,7 +1520,9 @@ async def create_note_from_template(request: Request, data: dict):
 @api_router.get("/notes", tags=["Notes"])
 async def list_notes(
     limit: Optional[int] = None,
-    offset: int = 0
+    offset: int = 0,
+    folder: Optional[str] = None,
+    recursive: bool = True
 ):
     """
     List all notes with metadata.
@@ -1531,14 +1534,22 @@ async def list_notes(
     Args:
         limit: Maximum number of notes to return (optional, no default limit)
         offset: Number of notes to skip (default: 0)
+        folder: Only return notes under this folder (optional)
+        recursive: With folder, also include subfolders (default: true)
     
     Examples:
         GET /api/notes              -> All notes
         GET /api/notes?limit=20     -> First 20 notes
         GET /api/notes?limit=20&offset=20 -> Notes 21-40
+        GET /api/notes?folder=projects&recursive=false -> Notes directly in projects
     """
     try:
         notes, folders = scan_notes_fast_walk(config['storage']['notes_dir'], include_media=True)
+
+        folder = folder.strip('/') if folder else None
+        if folder:
+            notes = [note for note in notes if is_in_folder(note['path'], folder, recursive)]
+            folders = [f for f in folders if f == folder or is_in_folder(f, folder, recursive)]
         
         # Apply pagination with consistent sorting by path for stable results
         result = paginate(
@@ -1955,7 +1966,9 @@ async def export_note_to_html(request: Request, note_path: str, theme: Optional[
 async def search(
     q: str,
     limit: Optional[int] = None,
-    offset: int = 0
+    offset: int = 0,
+    folder: Optional[str] = None,
+    recursive: bool = True
 ):
     """
     Search notes by content with optional pagination.
@@ -1964,9 +1977,12 @@ async def search(
         q: Search query string
         limit: Maximum number of results to return (optional, no default limit)
         offset: Number of results to skip (default: 0)
+        folder: Only return results under this folder (optional)
+        recursive: With folder, also include subfolders (default: true)
     
     Examples:
         GET /api/search?q=docker              -> All matching results
+        GET /api/search?q=docker&folder=work  -> Matching results under work
         GET /api/search?q=docker&limit=10     -> First 10 results
         GET /api/search?q=docker&limit=10&offset=10 -> Results 11-20
     """
@@ -1993,6 +2009,10 @@ async def search(
         hooked = plugin_manager.dispatch('on_search', query=q, results=results)
         plugin_replaced = hooked is not results
         results = hooked
+
+        folder = folder.strip('/') if folder else None
+        if folder:
+            results = [r for r in results if is_in_folder(r.get('path', ''), folder, recursive)]
 
         # Core results are sorted by path so pagination is reproducible between
         # requests (search_notes emits them in mtime order, which shifts as notes

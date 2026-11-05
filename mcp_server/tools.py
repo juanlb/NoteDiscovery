@@ -22,6 +22,14 @@ TOOLS: list[dict[str, Any]] = [
                     "type": "string",
                     "description": "Search query. Can be keywords, phrases, or natural language."
                 },
+                "folder": {
+                    "type": "string",
+                    "description": "Only include notes under this folder (e.g., 'projects/2024')."
+                },
+                "recursive": {
+                    "type": "boolean",
+                    "description": "With folder, also include subfolders. Defaults to true."
+                },
                 "limit": {
                     "type": "integer",
                     "description": "Maximum number of results to return. Useful for large vaults. If not specified, returns all matches."
@@ -36,10 +44,18 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "list_notes",
-        "description": "List all notes in the knowledge base with their metadata (title, path, last modified date, size). Use this to get an overview of available notes or find notes by browsing.",
+        "description": "List notes in the knowledge base with their metadata (title, path, last modified date, size). Use this to get an overview of available notes or find notes by browsing. Use folder to list only part of the vault.",
         "inputSchema": {
             "type": "object",
             "properties": {
+                "folder": {
+                    "type": "string",
+                    "description": "Only include notes under this folder (e.g., 'projects/2024')."
+                },
+                "recursive": {
+                    "type": "boolean",
+                    "description": "With folder, also include subfolders. Defaults to true."
+                },
                 "limit": {
                     "type": "integer",
                     "description": "Maximum number of notes to return. Useful for large vaults. If not specified, returns all notes."
