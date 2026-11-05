@@ -22,6 +22,14 @@ TOOLS: list[dict[str, Any]] = [
                     "type": "string",
                     "description": "Search query. Can be keywords, phrases, or natural language."
                 },
+                "folder": {
+                    "type": "string",
+                    "description": "Only include notes under this folder (e.g., 'projects/2024')."
+                },
+                "recursive": {
+                    "type": "boolean",
+                    "description": "With folder, also include subfolders. Defaults to true."
+                },
                 "limit": {
                     "type": "integer",
                     "description": "Maximum number of results to return. Useful for large vaults. If not specified, returns all matches."
@@ -36,10 +44,22 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "list_notes",
-        "description": "List all notes in the knowledge base with their metadata (title, path, last modified date, size). Use this to get an overview of available notes or find notes by browsing.",
+        "description": "List notes in the knowledge base with their metadata (title, path, last modified date, size). Use this to get an overview of available notes or find notes by browsing. Use folder to list only part of the vault.",
         "inputSchema": {
             "type": "object",
             "properties": {
+                "folder": {
+                    "type": "string",
+                    "description": "Only include notes under this folder (e.g., 'projects/2024')."
+                },
+                "recursive": {
+                    "type": "boolean",
+                    "description": "With folder, also include subfolders. Defaults to true."
+                },
+                "include_frontmatter": {
+                    "type": "boolean",
+                    "description": "Add each note's frontmatter fields, so there is no need to open each note. Defaults to false."
+                },
                 "limit": {
                     "type": "integer",
                     "description": "Maximum number of notes to return. Useful for large vaults. If not specified, returns all notes."
@@ -99,13 +119,35 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "get_notes_by_tag",
-        "description": "Get all notes that have a specific tag. Use this to find related notes on a topic.",
+        "description": "Get all notes that have a specific tag, or several tags. Use this to find related notes on a topic.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "tag": {
                     "type": "string",
-                    "description": "Tag name (without the # symbol)"
+                    "description": "Tag name (without the # symbol). Use tags for several tags."
+                },
+                "include_frontmatter": {
+                    "type": "boolean",
+                    "description": "Add each note's frontmatter fields, so there is no need to open each note. Defaults to false."
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Tag names (without the # symbol)."
+                },
+                "match": {
+                    "type": "string",
+                    "enum": ["all", "any"],
+                    "description": "With several tags: 'all' returns notes with every tag, 'any' returns notes with at least one. Defaults to 'all'."
+                },
+                "folder": {
+                    "type": "string",
+                    "description": "Only include notes under this folder (e.g., 'projects/2024')."
+                },
+                "recursive": {
+                    "type": "boolean",
+                    "description": "With folder, also include subfolders. Defaults to true."
                 },
                 "limit": {
                     "type": "integer",
@@ -116,7 +158,7 @@ TOOLS: list[dict[str, Any]] = [
                     "description": "Number of notes to skip. Use with limit for pagination."
                 }
             },
-            "required": ["tag"]
+            "required": []
         }
     },
     

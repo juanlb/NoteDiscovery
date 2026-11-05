@@ -5,6 +5,7 @@ Heavy work (backlinks, graph, full-text search, tag aggregation) is delegated
 to the in-memory index in note_index.py.
 """
 
+import json
 import logging
 import os
 import re
@@ -20,6 +21,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any, TypeVar, Callable
 from datetime import datetime, timezone
+
+import yaml
 
 from . import note_index
 from .note_index import NoteRecord, extract_links_from_content
@@ -315,6 +318,15 @@ def ensure_directories(config: dict):
     
     for dir_path in dirs:
         Path(dir_path).mkdir(parents=True, exist_ok=True)
+
+
+FRONTMATTER_MAX_LINES = 500
+
+
+def is_in_folder(path: str, folder: str, recursive: bool = True) -> bool:
+    """True when a vault-relative path sits under `folder`. Paths use forward slashes."""
+    parent = path.rpartition('/')[0]
+    return parent == folder or (recursive and parent.startswith(f"{folder}/"))
 
 
 def create_folder(notes_dir: str, folder_path: str) -> bool:
@@ -1153,6 +1165,36 @@ def parse_tags(content: str) -> List[str]:
         return []
 
 
+def read_frontmatter(notes_dir: str, note_path: str) -> Dict[str, Any]:
+    """Parsed YAML frontmatter of a note. Empty when it has none or it is invalid."""
+    full_path = Path(notes_dir) / note_path
+    if not validate_path_security(notes_dir, full_path):
+        return {}
+
+    lines: List[str] = []
+    try:
+        with open(full_path, 'r', encoding='utf-8') as f:
+            if f.readline().strip() != '---':
+                return {}
+            # Only the frontmatter is read, not the body of the note.
+            for line in f:
+                if line.strip() == '---':
+                    break
+                lines.append(line)
+                if len(lines) >= FRONTMATTER_MAX_LINES:
+                    return {}
+            else:
+                return {}
+        values = yaml.safe_load(''.join(lines))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return {}
+
+    if not isinstance(values, dict):
+        return {}
+    # YAML can produce dates and other values that JSON cannot carry.
+    return json.loads(json.dumps(values, default=str))
+
+
 def get_all_tags(notes_dir: str) -> Dict[str, int]:
     """All tags in the vault with note counts."""
     ensure_index_built(notes_dir)
@@ -1161,9 +1203,16 @@ def get_all_tags(notes_dir: str) -> Dict[str, int]:
 
 def get_notes_by_tag(notes_dir: str, tag: str) -> List[Dict]:
     """All notes carrying `tag` (case-insensitive)."""
+    return get_notes_by_tags(notes_dir, [tag])
+
+
+def get_notes_by_tags(notes_dir: str, tags: List[str], match: str = "all") -> List[Dict]:
+    """Notes carrying all of `tags`, or any of them when `match` is "any" (case-insensitive)."""
     ensure_index_built(notes_dir)
     idx = note_index.get_index()
-    records = [idx.get_note_record(p) for p in note_index.get_paths_for_tag(tag.lower())]
+    path_sets = [set(note_index.get_paths_for_tag(tag.lower())) for tag in tags]
+    paths = set.union(*path_sets) if match == "any" else set.intersection(*path_sets)
+    records = [idx.get_note_record(p) for p in paths]
     matching = [
         {
             "name": r.name,

@@ -3,7 +3,7 @@ NoteDiscovery - Self-Hosted Markdown Knowledge Base
 Main FastAPI application
 """
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Form, Depends, APIRouter, Response
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Form, Depends, APIRouter, Response, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,7 +21,7 @@ import json
 import logging
 import zipfile
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 from html import escape as html_escape
 from urllib.parse import quote_plus, parse_qs, urlparse
 import hashlib
@@ -55,6 +55,8 @@ from .utils import (
     rename_folder,
     delete_folder,
     folder_is_empty,
+    is_in_folder,
+    read_frontmatter,
     save_uploaded_image,
     _scan_cache_invalidate,
     validate_path_security,
@@ -62,6 +64,7 @@ from .utils import (
     collect_folder_files,
     get_all_tags,
     get_notes_by_tag,
+    get_notes_by_tags,
     get_templates,
     get_template_content,
     apply_template_placeholders,
@@ -1394,11 +1397,80 @@ async def list_tags():
         raise HTTPException(status_code=500, detail=safe_error_message(e, "Failed to load tags"))
 
 
+def _with_frontmatter(notes: List[dict]) -> List[dict]:
+    """Copies of the notes with their frontmatter. Media files get none."""
+    notes_dir = config['storage']['notes_dir']
+    return [
+        {**note, "frontmatter": read_frontmatter(notes_dir, note['path'])}
+        if note['path'].lower().endswith('.md') else note
+        for note in notes
+    ]
+
+
+@api_router.get("/tags-match", tags=["Tags"])
+async def get_notes_by_several_tags(
+    tags: List[str] = Query(default=[]),
+    match: Literal["all", "any"] = "all",
+    limit: Optional[int] = None,
+    offset: int = 0,
+    folder: Optional[str] = None,
+    recursive: bool = True,
+    include_frontmatter: bool = False
+):
+    """
+    Get the notes that have several tags, with optional folder filter and pagination.
+
+    Args:
+        tags: Tags to filter by (case-insensitive). Repeat the parameter for each tag.
+        match: "all" for notes with every tag (default), "any" for notes with at least one
+        limit: Maximum number of notes to return (optional, no default limit)
+        offset: Number of notes to skip (default: 0)
+        folder: Only return notes under this folder (optional)
+        recursive: With folder, also include subfolders (default: true)
+        include_frontmatter: Add each note's parsed frontmatter (default: false)
+
+    Examples:
+        GET /api/tags-match?tags=docker&tags=linux            -> Notes with both tags
+        GET /api/tags-match?tags=docker&tags=linux&match=any  -> Notes with either tag
+    """
+    if not tags:
+        raise HTTPException(status_code=400, detail="At least one tag required")
+
+    try:
+        notes = get_notes_by_tags(config['storage']['notes_dir'], tags, match)
+
+        folder = folder.strip('/') if folder else None
+        if folder:
+            notes = [note for note in notes if is_in_folder(note['path'], folder, recursive)]
+
+        paginated = paginate(
+            items=notes,
+            limit=limit,
+            offset=offset,
+            sort_key=lambda x: x.get('path', '').lower()
+        )
+
+        response = {
+            "tags": tags,
+            "match": match,
+            "count": paginated.total,
+            "notes": _with_frontmatter(paginated.items) if include_frontmatter else paginated.items
+        }
+
+        if limit is not None:
+            response["pagination"] = paginated.to_dict()
+
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=safe_error_message(e, "Failed to get notes by tags"))
+
+
 @api_router.get("/tags/{tag_name}", tags=["Tags"])
 async def get_notes_by_tag_endpoint(
     tag_name: str,
     limit: Optional[int] = None,
-    offset: int = 0
+    offset: int = 0,
+    include_frontmatter: bool = False
 ):
     """
     Get all notes that have a specific tag with optional pagination.
@@ -1407,6 +1479,7 @@ async def get_notes_by_tag_endpoint(
         tag_name: The tag to filter by (case-insensitive)
         limit: Maximum number of notes to return (optional, no default limit)
         offset: Number of notes to skip (default: 0)
+        include_frontmatter: Add each note's parsed frontmatter (default: false)
 
     Returns:
         List of notes matching the tag
@@ -1429,7 +1502,7 @@ async def get_notes_by_tag_endpoint(
         response = {
             "tag": tag_name,
             "count": paginated.total,
-            "notes": paginated.items
+            "notes": _with_frontmatter(paginated.items) if include_frontmatter else paginated.items
         }
         
         # Include pagination metadata only when limit is specified
@@ -1567,7 +1640,10 @@ async def create_note_from_template(request: Request, data: dict):
 @api_router.get("/notes", tags=["Notes"])
 async def list_notes(
     limit: Optional[int] = None,
-    offset: int = 0
+    offset: int = 0,
+    folder: Optional[str] = None,
+    recursive: bool = True,
+    include_frontmatter: bool = False
 ):
     """
     List all notes with metadata.
@@ -1579,14 +1655,23 @@ async def list_notes(
     Args:
         limit: Maximum number of notes to return (optional, no default limit)
         offset: Number of notes to skip (default: 0)
+        folder: Only return notes under this folder (optional)
+        recursive: With folder, also include subfolders (default: true)
+        include_frontmatter: Add each note's parsed frontmatter (default: false)
     
     Examples:
         GET /api/notes              -> All notes
         GET /api/notes?limit=20     -> First 20 notes
         GET /api/notes?limit=20&offset=20 -> Notes 21-40
+        GET /api/notes?folder=projects&recursive=false -> Notes directly in projects
     """
     try:
         notes, folders = scan_notes_fast_walk(config['storage']['notes_dir'], include_media=True)
+
+        folder = folder.strip('/') if folder else None
+        if folder:
+            notes = [note for note in notes if is_in_folder(note['path'], folder, recursive)]
+            folders = [f for f in folders if f == folder or is_in_folder(f, folder, recursive)]
         
         # Apply pagination with consistent sorting by path for stable results
         result = paginate(
@@ -1597,7 +1682,7 @@ async def list_notes(
         )
         
         response = {
-            "notes": result.items,
+            "notes": _with_frontmatter(result.items) if include_frontmatter else result.items,
             "folders": folders
         }
         
@@ -2003,7 +2088,9 @@ async def export_note_to_html(request: Request, note_path: str, theme: Optional[
 async def search(
     q: str,
     limit: Optional[int] = None,
-    offset: int = 0
+    offset: int = 0,
+    folder: Optional[str] = None,
+    recursive: bool = True
 ):
     """
     Search notes by content with optional pagination.
@@ -2012,9 +2099,12 @@ async def search(
         q: Search query string
         limit: Maximum number of results to return (optional, no default limit)
         offset: Number of results to skip (default: 0)
+        folder: Only return results under this folder (optional)
+        recursive: With folder, also include subfolders (default: true)
     
     Examples:
         GET /api/search?q=docker              -> All matching results
+        GET /api/search?q=docker&folder=work  -> Matching results under work
         GET /api/search?q=docker&limit=10     -> First 10 results
         GET /api/search?q=docker&limit=10&offset=10 -> Results 11-20
     """
@@ -2041,6 +2131,10 @@ async def search(
         hooked = plugin_manager.dispatch('on_search', query=q, results=results)
         plugin_replaced = hooked is not results
         results = hooked
+
+        folder = folder.strip('/') if folder else None
+        if folder:
+            results = [r for r in results if is_in_folder(r.get('path', ''), folder, recursive)]
 
         # Core results are sorted by path so pagination is reproducible between
         # requests (search_notes emits them in mtime order, which shifts as notes
