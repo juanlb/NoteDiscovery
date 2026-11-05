@@ -1149,9 +1149,16 @@ def get_all_tags(notes_dir: str) -> Dict[str, int]:
 
 def get_notes_by_tag(notes_dir: str, tag: str) -> List[Dict]:
     """All notes carrying `tag` (case-insensitive)."""
+    return get_notes_by_tags(notes_dir, [tag])
+
+
+def get_notes_by_tags(notes_dir: str, tags: List[str], match: str = "all") -> List[Dict]:
+    """Notes carrying all of `tags`, or any of them when `match` is "any" (case-insensitive)."""
     ensure_index_built(notes_dir)
     idx = note_index.get_index()
-    records = [idx.get_note_record(p) for p in note_index.get_paths_for_tag(tag.lower())]
+    path_sets = [set(note_index.get_paths_for_tag(tag.lower())) for tag in tags]
+    paths = set.union(*path_sets) if match == "any" else set.intersection(*path_sets)
+    records = [idx.get_note_record(p) for p in paths]
     matching = [
         {
             "name": r.name,

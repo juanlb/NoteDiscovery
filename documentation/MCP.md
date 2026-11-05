@@ -190,7 +190,7 @@ The MCP server provides these tools to AI assistants:
 | Tool | Description |
 |------|-------------|
 | `list_tags` | List all tags with note counts |
-| `get_notes_by_tag` | Find notes with a specific tag (supports pagination) |
+| `get_notes_by_tag` | Find notes with one tag or several, with `tags` and `match` (`all` or `any`). Accepts `folder` and pagination |
 | `get_graph` | Get knowledge graph data |
 | `get_backlinks` | Get notes that link to a specific note (reverse links) |
 

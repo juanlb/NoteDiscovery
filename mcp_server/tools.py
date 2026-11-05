@@ -97,13 +97,31 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "get_notes_by_tag",
-        "description": "Get all notes that have a specific tag. Use this to find related notes on a topic.",
+        "description": "Get all notes that have a specific tag, or several tags. Use this to find related notes on a topic.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "tag": {
                     "type": "string",
-                    "description": "Tag name (without the # symbol)"
+                    "description": "Tag name (without the # symbol). Use tags for several tags."
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Tag names (without the # symbol)."
+                },
+                "match": {
+                    "type": "string",
+                    "enum": ["all", "any"],
+                    "description": "With several tags: 'all' returns notes with every tag, 'any' returns notes with at least one. Defaults to 'all'."
+                },
+                "folder": {
+                    "type": "string",
+                    "description": "Only include notes under this folder (e.g., 'projects/2024')."
+                },
+                "recursive": {
+                    "type": "boolean",
+                    "description": "With folder, also include subfolders. Defaults to true."
                 },
                 "limit": {
                     "type": "integer",
@@ -114,7 +132,7 @@ TOOLS: list[dict[str, Any]] = [
                     "description": "Number of notes to skip. Use with limit for pagination."
                 }
             },
-            "required": ["tag"]
+            "required": []
         }
     },
     

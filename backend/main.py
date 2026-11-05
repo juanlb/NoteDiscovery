@@ -3,7 +3,7 @@ NoteDiscovery - Self-Hosted Markdown Knowledge Base
 Main FastAPI application
 """
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Form, Depends, APIRouter, Response
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Form, Depends, APIRouter, Response, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,7 +21,7 @@ import json
 import logging
 import zipfile
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Literal, Optional
 from html import escape as html_escape
 from urllib.parse import quote_plus, parse_qs, urlparse
 import hashlib
@@ -62,6 +62,7 @@ from .utils import (
     collect_folder_files,
     get_all_tags,
     get_notes_by_tag,
+    get_notes_by_tags,
     get_templates,
     get_template_content,
     apply_template_placeholders,
@@ -1345,6 +1346,62 @@ async def list_tags():
         return {"tags": tags}
     except Exception as e:
         raise HTTPException(status_code=500, detail=safe_error_message(e, "Failed to load tags"))
+
+
+@api_router.get("/tags-match", tags=["Tags"])
+async def get_notes_by_several_tags(
+    tags: List[str] = Query(default=[]),
+    match: Literal["all", "any"] = "all",
+    limit: Optional[int] = None,
+    offset: int = 0,
+    folder: Optional[str] = None,
+    recursive: bool = True
+):
+    """
+    Get the notes that have several tags, with optional folder filter and pagination.
+
+    Args:
+        tags: Tags to filter by (case-insensitive). Repeat the parameter for each tag.
+        match: "all" for notes with every tag (default), "any" for notes with at least one
+        limit: Maximum number of notes to return (optional, no default limit)
+        offset: Number of notes to skip (default: 0)
+        folder: Only return notes under this folder (optional)
+        recursive: With folder, also include subfolders (default: true)
+
+    Examples:
+        GET /api/tags-match?tags=docker&tags=linux            -> Notes with both tags
+        GET /api/tags-match?tags=docker&tags=linux&match=any  -> Notes with either tag
+    """
+    if not tags:
+        raise HTTPException(status_code=400, detail="At least one tag required")
+
+    try:
+        notes = get_notes_by_tags(config['storage']['notes_dir'], tags, match)
+
+        folder = folder.strip('/') if folder else None
+        if folder:
+            notes = [note for note in notes if is_in_folder(note['path'], folder, recursive)]
+
+        paginated = paginate(
+            items=notes,
+            limit=limit,
+            offset=offset,
+            sort_key=lambda x: x.get('path', '').lower()
+        )
+
+        response = {
+            "tags": tags,
+            "match": match,
+            "count": paginated.total,
+            "notes": paginated.items
+        }
+
+        if limit is not None:
+            response["pagination"] = paginated.to_dict()
+
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=safe_error_message(e, "Failed to get notes by tags"))
 
 
 @api_router.get("/tags/{tag_name}", tags=["Tags"])
