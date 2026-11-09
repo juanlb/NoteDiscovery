@@ -25,7 +25,7 @@ Board schema (optional): <folder>/_board.md
 
     ---
     board:
-      columns: [backlog, todo, doing, done]   # column order = status values
+      columns: [backlog, todo, doing, review, done, rejected]   # column order = status values
       labels: {todo: To do, doing: In progress}   # optional display names
       done: [done]                            # columns shown as finished
       fields:                                 # custom fields shown on the card
@@ -90,15 +90,15 @@ BOARD_FILE = "_board.md"
 # same as a small one.
 MAX_READ_CHARS = 16 * 1024
 
-DEFAULT_COLUMNS = ["backlog", "todo", "doing", "done"]
-DEFAULT_DONE = ["done"]
+DEFAULT_COLUMNS = ["backlog", "todo", "doing", "review", "done", "rejected"]
+DEFAULT_DONE = ["done", "rejected"]
 DEFAULT_FIELDS = {"due": "date", "priority": ["low", "med", "high"], "owner": "text"}
 
 # What the "Create _board.md" button writes.
 BOARD_TEMPLATE = """---
 board:
-  columns: [backlog, todo, doing, done]
-  done: [done]
+  columns: [backlog, todo, doing, review, done, rejected]
+  done: [done, rejected]
   fields:
     due: date
     priority: [low, med, high]
@@ -1152,7 +1152,7 @@ const KANBAN_TEXT = {
     new_card: 'New card', new_card_in: 'New card in {column}', title: 'Title', column: 'Column', create: 'Create', cancel: 'Cancel',
     create_error: 'Could not create the note', create_board: 'Create _board.md', invalid_frontmatter: 'Invalid frontmatter',
     unknown_status: 'Unknown status: {status}', invalid_board: 'Invalid _board.md, using the default columns',
-    columns: { backlog: 'Backlog', todo: 'To do', doing: 'In progress', done: 'Done' },
+    columns: { backlog: 'Backlog', todo: 'To do', doing: 'In progress', review: 'Review', done: 'Done', rejected: 'Rejected' },
     priorities: { low: 'Low', med: 'Medium', medium: 'Medium', high: 'High' },
   },
   es: {
@@ -1181,7 +1181,7 @@ const KANBAN_TEXT = {
     new_card: 'Nueva card', new_card_in: 'Nueva card en {column}', title: 'Título', column: 'Columna', create: 'Crear', cancel: 'Cancelar',
     create_error: 'No se pudo crear la nota', create_board: 'Crear _board.md', invalid_frontmatter: 'Frontmatter inválido',
     unknown_status: 'Status desconocido: {status}', invalid_board: '_board.md inválido, se usan las columnas por defecto',
-    columns: { backlog: 'Backlog', todo: 'Por hacer', doing: 'En curso', done: 'Hecho' },
+    columns: { backlog: 'Backlog', todo: 'Por hacer', doing: 'En curso', review: 'Review', done: 'Hecho', rejected: 'Rechazada' },
     priorities: { low: 'Baja', med: 'Media', medium: 'Media', high: 'Alta' },
   },
 };
@@ -1389,7 +1389,7 @@ function kanbanBoard() {
     loading: true,
     failed: false,
     query: '',
-    activeTag: null,
+    activeTags: [],
     activeColumn: null,
     draggedPath: null,
     dropColumn: null,
@@ -1437,7 +1437,7 @@ function kanbanBoard() {
         this.failed = false;
         const ids = this.board.columns.map(column => column.id);
         if (!ids.includes(this.activeColumn)) this.activeColumn = ids[0];
-        if (this.activeTag && !this.allTags().includes(this.activeTag)) this.activeTag = null;
+        this.activeTags = this.activeTags.filter(tag => this.allTags().includes(tag));
       } catch (e) {
         console.error('Failed to load the board:', e);
         // A failed background reload keeps the cards that are already on screen.
@@ -1461,8 +1461,14 @@ function kanbanBoard() {
       return [...tags].sort((a, b) => a.localeCompare(b));
     },
 
+    toggleTag(tag) {
+      this.activeTags = this.activeTags.includes(tag)
+        ? this.activeTags.filter(t => t !== tag)
+        : [...this.activeTags, tag];
+    },
+
     matches(card) {
-      if (this.activeTag && !card.tags.includes(this.activeTag)) return false;
+      if (this.activeTags.length && !this.activeTags.every(tag => card.tags.includes(tag))) return false;
       const query = kanbanFold(this.query.trim());
       if (!query) return true;
       const haystack = [card.title, card.name, ...card.tags, ...Object.values(card.fields)].join(' ');
@@ -2159,9 +2165,9 @@ function kanbanBoard() {
     <div style="display: contents">
       <div class="filters">
         <div class="chips">
-          <button class="chip-btn" type="button" :aria-pressed="activeTag === null" @click="activeTag = null" x-text="text.all"></button>
+          <button class="chip-btn" type="button" :aria-pressed="activeTags.length === 0" @click="activeTags = []" x-text="text.all"></button>
           <template x-for="tag in allTags()" :key="tag">
-            <button class="chip-btn" type="button" :aria-pressed="activeTag === tag" @click="activeTag = tag" x-text="tag"></button>
+            <button class="chip-btn" type="button" :aria-pressed="activeTags.includes(tag)" @click="toggleTag(tag)" x-text="tag"></button>
           </template>
         </div>
         <span class="count" x-text="countLabel()"></span>
@@ -2196,7 +2202,7 @@ function kanbanBoard() {
               </button>
             </div>
             <div class="cards">
-              <p class="empty-column" style="margin: 0" x-show="columnCards(column.id).length === 0" x-text="query || activeTag ? text.no_matches : text.no_cards"></p>
+              <p class="empty-column" style="margin: 0" x-show="columnCards(column.id).length === 0" x-text="query || activeTags.length ? text.no_matches : text.no_cards"></p>
               <template x-for="card in columnCards(column.id)" :key="card.path">
                 <article class="card"
                          :class="{ 'card-done': isDone(card), 'card-moving': movingPath === card.path || draggedPath === card.path }"
