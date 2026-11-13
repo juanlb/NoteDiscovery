@@ -53,6 +53,24 @@ TOOLS: list[dict[str, Any]] = [
         }
     },
     {
+        "name": "list_folders",
+        "description": "List folders in the knowledge base, including empty ones, with the number of notes and subfolders directly inside each one.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "parent": {
+                    "type": "string",
+                    "description": "Only list folders under this folder (e.g., 'projects'). If not specified, starts at the vault root."
+                },
+                "recursive": {
+                    "type": "boolean",
+                    "description": "Include all nested folders. Set to false to list only direct children. Defaults to true."
+                }
+            },
+            "required": []
+        }
+    },
+    {
         "name": "get_note",
         "description": "Read the full content of a specific note by its path. Returns the complete markdown content along with metadata. Use this after finding a note via search or list to read its contents.",
         "inputSchema": {
