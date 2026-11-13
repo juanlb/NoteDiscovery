@@ -21,7 +21,7 @@ import json
 import logging
 import zipfile
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 from html import escape as html_escape
 from urllib.parse import quote_plus, parse_qs, urlparse
 import hashlib
@@ -54,6 +54,7 @@ from .utils import (
     move_folder,
     rename_folder,
     delete_folder,
+    folder_is_empty,
     save_uploaded_image,
     _scan_cache_invalidate,
     validate_path_security,
@@ -68,6 +69,7 @@ from .utils import (
     get_backlinks,
 )
 from . import note_index
+from .link_updates import update_links_after_move
 from .plugins import PluginManager
 from .themes import get_available_themes, get_theme_css
 from .share import (
@@ -1143,16 +1145,42 @@ async def move_media_endpoint(request: Request, data: dict):
         raise HTTPException(status_code=500, detail=safe_error_message(e, "Failed to move media file"))
 
 
+def _vault_file_paths() -> List[str]:
+    """Path of every note and media file, read fresh from disk."""
+    notes, _ = scan_notes_fast_walk(config['storage']['notes_dir'], use_cache=False, include_media=True)
+    return [note['path'] for note in notes]
+
+
+def _update_links(paths_before: List[str], moves: Dict[str, str]) -> dict:
+    """Rewrite the links a move affected. Returns the response fields that report it."""
+    notes_dir = config['storage']['notes_dir']
+
+    def save(path: str, content: str) -> bool:
+        transformed = plugin_manager.dispatch('on_note_save', note_path=path, content=content)
+        return save_note(notes_dir, path, transformed)
+
+    updated, failed = update_links_after_move(
+        paths_before,
+        moves,
+        lambda path: get_note_content(notes_dir, path),
+        save,
+    )
+    return {"updatedLinksIn": updated, "linkUpdateFailedIn": failed}
+
+
 @api_router.post("/notes/move", tags=["Notes"])
 @limiter.limit("30/minute")
 async def move_note_endpoint(request: Request, data: dict):
-    """Move a note to a different folder"""
+    """Move a note to a different folder. With updateLinks, also rewrite links to it."""
     try:
         old_path = data.get('oldPath', '')
         new_path = data.get('newPath', '')
+        update_links = data.get('updateLinks') is True
         
         if not old_path or not new_path:
             raise HTTPException(status_code=400, detail="Both oldPath and newPath required")
+
+        paths_before = _vault_file_paths() if update_links else []
         
         success, error_msg = move_note(config['storage']['notes_dir'], old_path, new_path)
         
@@ -1165,12 +1193,15 @@ async def move_note_endpoint(request: Request, data: dict):
         # Run plugin hooks
         plugin_manager.dispatch('on_note_save', note_path=new_path, content='')
         
-        return {
+        result = {
             "success": True,
             "oldPath": old_path,
             "newPath": new_path,
             "message": "Note moved successfully"
         }
+        if update_links:
+            result.update(_update_links(paths_before, {old_path: new_path}))
+        return result
     except HTTPException:
         raise
     except Exception as e:
@@ -1246,13 +1277,16 @@ async def replace_in_note(request: Request, data: dict):
 @api_router.post("/folders/move", tags=["Folders"])
 @limiter.limit("20/minute")
 async def move_folder_endpoint(request: Request, data: dict):
-    """Move a folder to a different location"""
+    """Move a folder to a different location. With updateLinks, also rewrite links into it."""
     try:
         old_path = data.get('oldPath', '')
         new_path = data.get('newPath', '')
+        update_links = data.get('updateLinks') is True
         
         if not old_path or not new_path:
             raise HTTPException(status_code=400, detail="Both oldPath and newPath required")
+
+        paths_before = _vault_file_paths() if update_links else []
         
         success, error_msg = move_folder(config['storage']['notes_dir'], old_path, new_path)
         
@@ -1262,12 +1296,22 @@ async def move_folder_endpoint(request: Request, data: dict):
         # Share tokens store a note path. A folder move changes every note under it.
         update_token_prefix(config['storage']['notes_dir'], old_path, new_path)
         
-        return {
+        result = {
             "success": True,
             "oldPath": old_path,
             "newPath": new_path,
             "message": "Folder moved successfully"
         }
+        if update_links:
+            old_prefix = old_path.strip('/') + '/'
+            new_prefix = new_path.strip('/') + '/'
+            moves = {
+                path: new_prefix + path[len(old_prefix):]
+                for path in paths_before
+                if path.startswith(old_prefix)
+            }
+            result.update(_update_links(paths_before, moves))
+        return result
     except HTTPException:
         raise
     except Exception as e:
@@ -1307,13 +1351,17 @@ async def rename_folder_endpoint(request: Request, data: dict):
 
 @api_router.delete("/folders/{folder_path:path}", tags=["Folders"])
 @limiter.limit("20/minute")
-async def delete_folder_endpoint(request: Request, folder_path: str):
-    """Delete a folder and all its contents"""
+async def delete_folder_endpoint(request: Request, folder_path: str, require_empty: bool = False):
+    """Delete a folder and all its contents. With require_empty, only delete an empty folder."""
     try:
         if not folder_path:
             raise HTTPException(status_code=400, detail="Folder path required")
+
+        notes_dir = config['storage']['notes_dir']
+        if require_empty and (Path(notes_dir) / folder_path).is_dir() and not folder_is_empty(notes_dir, folder_path):
+            raise HTTPException(status_code=409, detail=f"Folder is not empty: {folder_path}")
         
-        success = delete_folder(config['storage']['notes_dir'], folder_path)
+        success = delete_folder(notes_dir, folder_path)
         
         if not success:
             raise HTTPException(status_code=500, detail="Failed to delete folder")

@@ -204,6 +204,8 @@ The MCP server provides these tools to AI assistants:
 | `move_note` | Move or rename a note |
 | `delete_note` | Delete a note |
 | `create_folder` | Create a new folder |
+| `move_folder` | Move or rename a folder with everything inside it |
+| `delete_folder` | Delete a folder (only an empty one, unless `recursive` is true) |
 
 ### Templates
 
@@ -296,6 +298,9 @@ Move or rename a note to a different location.
 |-----------|------|----------|-------------|
 | `old_path` | string | Yes | Current note path |
 | `new_path` | string | Yes | New path (can include folder) |
+| `update_links` | boolean | No | Rewrite links in other notes (default: true) |
+
+The response lists the notes whose links changed. Text inside code blocks and inline code does not change. A link by note name, like `[[note]]`, stays as it is while the name still finds the note. `move_folder` works the same way.
 
 **Example prompt:** "Move draft.md to published/final-article.md"
 
