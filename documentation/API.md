@@ -19,6 +19,17 @@ Returns all notes with their metadata and folder structure.
 
 When `limit` is provided, the response includes pagination metadata.
 
+**Optional Folder Filter:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `folder` | string | - | Only return notes under this folder |
+| `recursive` | boolean | true | With `folder`, also include subfolders |
+
+**Optional Frontmatter:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `include_frontmatter` | boolean | false | Add a `frontmatter` object to each note. `GET /api/tags/{tag_name}` and `GET /api/tags-match` also accept it |
+
 **Examples:**
 ```bash
 # Get all notes (default)
@@ -439,6 +450,12 @@ match most of a vault and cannot use the search index.
 | `limit` | integer | - | Max results to return (omit for all) |
 | `offset` | integer | 0 | Number of results to skip |
 
+**Optional Folder Filter:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `folder` | string | - | Only return results under this folder |
+| `recursive` | boolean | true | With `folder`, also include subfolders |
+
 **Examples:**
 ```bash
 # Search all matches
@@ -786,7 +803,7 @@ GET /api/tags/{tag_name}
 GET /api/tags/{tag_name}?limit=10&offset=0
 ```
 
-Returns all notes that have a specific tag.
+Returns all notes that have a specific tag. To filter by several tags, see [Get Notes by Several Tags](#get-notes-by-several-tags).
 
 **Optional Pagination:**
 | Parameter | Type | Default | Description |
@@ -809,6 +826,21 @@ Returns all notes that have a specific tag.
   ]
 }
 ```
+
+### Get Notes by Several Tags
+```http
+GET /api/tags-match?tags=python&tags=tutorial
+GET /api/tags-match?tags=python&tags=tutorial&match=any&folder=work
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `tags` | string | - | Tag to filter by. Repeat it for each tag (required) |
+| `match` | string | `all` | `all` for notes with every tag, `any` for notes with at least one |
+| `limit` | integer | - | Max notes to return (omit for all) |
+| `offset` | integer | 0 | Number of notes to skip |
+| `folder` | string | - | Only return notes under this folder |
+| `recursive` | boolean | true | With `folder`, also include subfolders |
 
 ---
 

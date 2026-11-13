@@ -191,7 +191,7 @@ The MCP server provides these tools to AI assistants:
 | Tool | Description |
 |------|-------------|
 | `list_tags` | List all tags with note counts |
-| `get_notes_by_tag` | Find notes with a specific tag (supports pagination) |
+| `get_notes_by_tag` | Find notes with one tag or several, with `tags` and `match` (`all` or `any`). Accepts `folder` and pagination |
 | `get_graph` | Get knowledge graph data |
 | `get_backlinks` | Get notes that link to a specific note (reverse links) |
 
@@ -237,6 +237,10 @@ Some tools support optional pagination parameters for large vaults:
 
 - `limit` - Maximum items to return (omit for all)
 - `offset` - Number of items to skip (for pagination)
+
+`list_notes` and `get_notes_by_tag` accept `include_frontmatter`, which adds each note's frontmatter fields to the result.
+
+`search_notes` and `list_notes` also accept `folder`, to return only notes under that folder, and `recursive` (default: true), to include or skip its subfolders. Pagination applies after the folder filter.
 
 **Example prompts:**
 - "Search for notes about Python, but just show me the first 5 results"

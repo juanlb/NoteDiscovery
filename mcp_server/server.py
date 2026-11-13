@@ -216,11 +216,19 @@ class MCPServer:
         limit = args.get("limit")
         offset = args.get("offset", 0)
 
+        folder = args.get("folder")
+        recursive = args.get("recursive", True)
+
         if not query:
             return "No search term provided. Please specify a query."
 
+        if folder:
+            is_valid, error = self._validate_path(folder)
+            if not is_valid:
+                return f"Error: {error.replace('path', 'folder')}"
+
         # Use server-side pagination if limit is specified
-        response = self.client.search(query, limit=limit, offset=offset)
+        response = self.client.search(query, limit=limit, offset=offset, folder=folder, recursive=recursive)
         
         if not response.success:
             return f"Search failed: {response.error}"
@@ -265,9 +273,22 @@ class MCPServer:
         """List all notes."""
         limit = args.get("limit")
         offset = args.get("offset", 0)
+        folder = args.get("folder")
+        recursive = args.get("recursive", True)
+
+        if folder:
+            is_valid, error = self._validate_path(folder)
+            if not is_valid:
+                return f"Error: {error.replace('path', 'folder')}"
 
         # Use server-side pagination if limit is specified
-        response = self.client.list_notes(limit=limit, offset=offset)
+        response = self.client.list_notes(
+            limit=limit,
+            offset=offset,
+            folder=folder,
+            recursive=recursive,
+            include_frontmatter=args.get("include_frontmatter", False),
+        )
         
         if not response.success:
             return f"Failed to list notes: {response.error}"
@@ -299,6 +320,8 @@ class MCPServer:
                 name = note.get("name", "unknown")
                 modified = note.get("modified", "")
                 output.append(f"   📝 {name} (modified: {modified})")
+                if "frontmatter" in note:
+                    output.append(f"      frontmatter: {json.dumps(note['frontmatter'], ensure_ascii=False)}")
             output.append("")
         
         # Add pagination hint if there are more results
@@ -402,14 +425,34 @@ class MCPServer:
     def _tool_get_notes_by_tag(self, args: dict) -> str:
         """Get notes with a specific tag."""
         tag = args.get("tag", "")
+        tags = [t for t in args.get("tags") or [] if t]
+        if tag and tag not in tags:
+            tags.insert(0, tag)
+        match = args.get("match", "all")
         limit = args.get("limit")
         offset = args.get("offset", 0)
+        folder = args.get("folder")
+        recursive = args.get("recursive", True)
 
-        if not tag:
-            return "Error: tag is required"
+        if not tags:
+            return "Error: tag or tags is required"
+        if match not in ("all", "any"):
+            return "Error: match must be 'all' or 'any'"
+        if folder:
+            is_valid, error = self._validate_path(folder)
+            if not is_valid:
+                return f"Error: {error.replace('path', 'folder')}"
 
         # Use server-side pagination if limit is specified
-        response = self.client.get_notes_by_tag(tag, limit=limit, offset=offset)
+        response = self.client.get_notes_by_tags(
+            tags,
+            match=match,
+            limit=limit,
+            offset=offset,
+            folder=folder,
+            recursive=recursive,
+            include_frontmatter=args.get("include_frontmatter", False),
+        )
 
         if not response.success:
             return f"Failed to get notes by tag: {response.error}"
@@ -419,18 +462,23 @@ class MCPServer:
         count = data.get("count", len(notes))
         pagination = data.get("pagination")
 
+        separator = " and " if match == "all" else " or "
+        label = separator.join(f"#{t}" for t in tags)
+
         if not notes:
-            return f"No notes found with tag '#{tag}'"
+            return f"No notes found with tag {label}"
 
         # Build header with pagination info if available
         if pagination:
-            output = [f"Notes with tag #{tag} ({count} total, showing {len(notes)}):\n"]
+            output = [f"Notes with tag {label} ({count} total, showing {len(notes)}):\n"]
         else:
-            output = [f"Notes with tag #{tag} ({count} total):\n"]
+            output = [f"Notes with tag {label} ({count} total):\n"]
         
         for note in notes:
             path = note.get("path", "unknown")
             output.append(f"  📝 {path}")
+            if "frontmatter" in note:
+                output.append(f"     frontmatter: {json.dumps(note['frontmatter'], ensure_ascii=False)}")
 
         # Add pagination hint if there are more results
         if pagination and pagination.get("has_more"):
